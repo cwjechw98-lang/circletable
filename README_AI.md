@@ -388,10 +388,16 @@ powershell -ExecutionPolicy Bypass -File C:\REPO\circletable\shutdown_round_tabl
 
 Подготовленные файлы:
 - [assets/github-header.svg](C:\REPO\circletable\assets\github-header.svg)
+- [assets/github-header.png](C:\REPO\circletable\assets\github-header.png)
 - [assets/repo-social-preview.svg](C:\REPO\circletable\assets\repo-social-preview.svg)
+- [assets/repo-social-preview.png](C:\REPO\circletable\assets\repo-social-preview.png)
 - [frontend/public/social-preview.svg](C:\REPO\circletable\frontend\public\social-preview.svg)
+- [frontend/public/social-preview.png](C:\REPO\circletable\frontend\public\social-preview.png)
 - [frontend/public/favicon.svg](C:\REPO\circletable\frontend\public\favicon.svg)
+- [frontend/public/favicon.png](C:\REPO\circletable\frontend\public\favicon.png)
 - [RELEASE_README.md](C:\REPO\circletable\RELEASE_README.md)
+- [RELEASE_v0.1.0.md](C:\REPO\circletable\RELEASE_v0.1.0.md)
+- [CHANGELOG.md](C:\REPO\circletable\CHANGELOG.md)
 
 ## 17. Последнее правило для следующего ИИ
 

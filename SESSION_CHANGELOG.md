@@ -233,7 +233,13 @@
 
 Дополнительно подготовлен отдельный набор оформления:
 - [frontend/public/favicon.svg](C:\REPO\circletable\frontend\public\favicon.svg) — favicon приложения;
+- [frontend/public/favicon.png](C:\REPO\circletable\frontend\public\favicon.png) — PNG-иконка приложения;
 - [frontend/public/social-preview.svg](C:\REPO\circletable\frontend\public\social-preview.svg) — social preview карточка приложения;
+- [frontend/public/social-preview.png](C:\REPO\circletable\frontend\public\social-preview.png) — PNG social preview карточка приложения;
+- [assets/github-header.png](C:\REPO\circletable\assets\github-header.png) — PNG-версия шапки репозитория;
 - [assets/repo-social-preview.svg](C:\REPO\circletable\assets\repo-social-preview.svg) — social preview для репозитория;
+- [assets/repo-social-preview.png](C:\REPO\circletable\assets\repo-social-preview.png) — PNG social preview для репозитория;
 - [RELEASE_README.md](C:\REPO\circletable\RELEASE_README.md) — отдельный релизный README;
+- [RELEASE_v0.1.0.md](C:\REPO\circletable\RELEASE_v0.1.0.md) — текст первого релиза;
+- [CHANGELOG.md](C:\REPO\circletable\CHANGELOG.md) — версионируемый changelog;
 - [frontend/index.html](C:\REPO\circletable\frontend\index.html) обновлён мета-тегами `description`, `theme-color`, `og:*`, `twitter:*` и ссылкой на новый favicon.

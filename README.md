@@ -1,4 +1,4 @@
-![Круглый стол ИИ](./assets/github-header.svg)
+![Круглый стол ИИ](./assets/github-header.png)
 
 # ⚔ КРУГЛЫЙ СТОЛ ИИ ⚔
 
@@ -12,7 +12,7 @@
 `circletable` — это локальное приложение, в котором несколько ИИ-персонажей обсуждают заданную тему за виртуальным круглым столом.  
 У каждого персонажа есть характер, профессиональный профиль, модель и своя манера вести дискуссию.
 
-![Социальное превью репозитория](./assets/repo-social-preview.svg)
+![Социальное превью репозитория](./assets/repo-social-preview.png)
 
 Проект уже умеет не только запускать “бесконечный чат”, но и работать как полноценная игровая сессия:
 - с комнатами;
@@ -90,12 +90,13 @@ cd C:\REPO\circletable
 ## Медиа и оформление
 
 Для проекта уже подготовлены готовые визуальные ассеты:
-- [assets/github-header.svg](./assets/github-header.svg) — шапка репозитория
-- [assets/repo-social-preview.svg](./assets/repo-social-preview.svg) — карточка превью для GitHub / релизов
-- [frontend/public/social-preview.svg](./frontend/public/social-preview.svg) — карточка приложения
-- [frontend/public/favicon.svg](./frontend/public/favicon.svg) — favicon приложения
+- [assets/github-header.svg](./assets/github-header.svg) и [assets/github-header.png](./assets/github-header.png) — шапка репозитория
+- [assets/repo-social-preview.svg](./assets/repo-social-preview.svg) и [assets/repo-social-preview.png](./assets/repo-social-preview.png) — карточка превью для GitHub / релизов
+- [frontend/public/social-preview.svg](./frontend/public/social-preview.svg) и [frontend/public/social-preview.png](./frontend/public/social-preview.png) — карточка приложения
+- [frontend/public/favicon.svg](./frontend/public/favicon.svg) и [frontend/public/favicon.png](./frontend/public/favicon.png) — иконка приложения
 
 Если репозиторий нужно оформить полностью, `assets/repo-social-preview.svg` можно использовать как основу для ручной загрузки в `GitHub → Settings → Social preview`.
+Если нужен максимально совместимый вариант, лучше загружать PNG: `assets/repo-social-preview.png`.
 
 ## Полезные сценарии
 
@@ -179,6 +180,8 @@ npm run build
 
 Для публичного описания релиза подготовлен отдельный файл:
 - [RELEASE_README.md](./RELEASE_README.md)
+- [RELEASE_v0.1.0.md](./RELEASE_v0.1.0.md)
+- [CHANGELOG.md](./CHANGELOG.md)
 
 ## Текущий статус
 
