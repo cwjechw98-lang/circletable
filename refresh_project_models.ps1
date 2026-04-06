@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 try {
-    $response = Invoke-RestMethod -Method Post 'http://localhost:8000/api/providers/refresh' -TimeoutSec 5
+    $response = Invoke-RestMethod -Method Post 'http://127.0.0.1:43117/api/providers/refresh' -TimeoutSec 5
 
     if (-not $response.ok) {
         throw 'Refresh confirmation was not received.'

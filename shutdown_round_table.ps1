@@ -38,8 +38,8 @@ function Stop-MatchingProcesses {
 Start-Sleep -Seconds $DelaySeconds
 
 $windowTitles = @(
-    'Backend :8000',
-    'Frontend :5173',
+    'Backend :43117',
+    'Frontend :43118',
     'AI Round Table',
     'Start AI Round Table'
 )

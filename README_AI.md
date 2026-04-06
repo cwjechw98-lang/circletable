@@ -52,8 +52,8 @@ Frontend:
 - [04_shutdown_round_table.bat](C:\REPO\circletable\04_shutdown_round_table.bat) — ручное завершение dev-сеанса
 
 Обычные адреса:
-- backend: `http://localhost:8000`
-- frontend: `http://localhost:5173`
+- backend: `http://127.0.0.1:43117`
+- frontend: `http://127.0.0.1:43118`
 
 ## 4. Где хранится состояние
 
@@ -327,7 +327,7 @@ Frontend:
 - backend переводит активную сессию в безопасное состояние;
 - backend пишет событие завершения;
 - backend запускает helper-скрипт;
-- helper закрывает окна `Backend :8000` и `Frontend :5173`.
+- helper закрывает окна `Backend :43117` и `Frontend :43118`.
 
 Что важно помнить:
 - полноценный destructive test этого сценария лучше делать вручную отдельно;

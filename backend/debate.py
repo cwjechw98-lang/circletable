@@ -194,10 +194,14 @@ class DebateEngine:
                         "endedAt": utc_now(),
                     },
                 )
-        self._state = "idle"
+                session = self.repo.get_session(self._running_session_id)
+            if session:
+                self._state = session["status"]
+            else:
+                self._state = "idle"
         self._task = None
         self._round_state = None
-        await self._broadcast_session_state()
+        await self._broadcast_session_state(session)
         if self._running_room_id:
             await self._broadcast_room_loaded(self._running_room_id)
 
@@ -452,13 +456,17 @@ class DebateEngine:
         except asyncio.CancelledError:
             raise
         finally:
+            final_session = self.repo.get_session(self._running_session_id) if self._running_session_id else None
             self._task = None
-            self._state = "idle"
+            if final_session and final_session["status"] in {"completed", "stopped"}:
+                self._state = final_session["status"]
+            else:
+                self._state = "idle"
             self._pause_requested = False
             self._stop_requested = False
             self._resume_event.set()
             self._round_state = None
-            await self._broadcast_session_state()
+            await self._broadcast_session_state(final_session)
 
     async def _enter_paused(self):
         if not self._running_session_id:

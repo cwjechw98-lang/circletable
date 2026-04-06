@@ -1,6 +1,23 @@
 import { useRef, useEffect, useCallback } from 'react'
 
-const WS_URL = `ws://${window.location.host}/ws`
+const DEV_FRONTEND_PORT = '43118'
+const DEV_BACKEND_PORT = '43117'
+
+function resolveBackendOrigin() {
+  const explicitOrigin = import.meta.env.VITE_API_PROXY_TARGET
+  if (explicitOrigin) {
+    return explicitOrigin
+  }
+
+  const { protocol, hostname, port, origin } = window.location
+  if (port === DEV_FRONTEND_PORT) {
+    return `${protocol}//${hostname}:${DEV_BACKEND_PORT}`
+  }
+
+  return origin
+}
+
+const WS_URL = `${resolveBackendOrigin().replace(/^http/, 'ws')}/ws`
 
 export function useWebSocket(onMessage) {
   const wsRef = useRef(null)

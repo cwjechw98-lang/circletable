@@ -10,6 +10,8 @@ echo.
 set "ROOT=%~dp0"
 set "BACKEND=%ROOT%backend"
 set "FRONTEND=%ROOT%frontend"
+set "BACKEND_PORT=43117"
+set "FRONTEND_PORT=43118"
 
 :: -- 1. Python venv --
 echo [1/4] Проверяем Python venv...
@@ -46,10 +48,10 @@ echo  ГОТОВО: Frontend готов.
 
 :: -- 3. Kill old instances --
 echo [3/4] Очищаем старые запуски...
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000" ^| findstr "LISTENING"') do (
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":%BACKEND_PORT%" ^| findstr "LISTENING"') do (
     taskkill /F /PID %%a > nul 2>&1
 )
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":5173" ^| findstr "LISTENING"') do (
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":%FRONTEND_PORT%" ^| findstr "LISTENING"') do (
     taskkill /F /PID %%a > nul 2>&1
 )
 echo  ГОТОВО: Порты очищены.
@@ -58,20 +60,20 @@ echo  ГОТОВО: Порты очищены.
 echo [4/4] Запускаем серверы...
 echo.
 
-start "Backend :8000" /d "%BACKEND%" cmd /k "title Backend :8000 && chcp 65001 > nul && venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000 --host 0.0.0.0"
+start "Backend :%BACKEND_PORT%" /d "%BACKEND%" cmd /k "title Backend :%BACKEND_PORT% && chcp 65001 > nul && venv\Scripts\python.exe -m uvicorn main:app --reload --port %BACKEND_PORT% --host 127.0.0.1"
 timeout /t 3 /nobreak > nul
 
-start "Frontend :5173" /d "%FRONTEND%" cmd /k "title Frontend :5173 && chcp 65001 > nul && npm run dev"
+start "Frontend :%FRONTEND_PORT%" /d "%FRONTEND%" cmd /k "title Frontend :%FRONTEND_PORT% && chcp 65001 > nul && set \"VITE_API_PROXY_TARGET=http://127.0.0.1:%BACKEND_PORT%\" && npm run dev -- --host 127.0.0.1 --port %FRONTEND_PORT%"
 timeout /t 5 /nobreak > nul
 
 :: -- 5. Open browser --
 echo Открываем браузер...
-start "" http://localhost:5173
+start "" http://127.0.0.1:%FRONTEND_PORT%
 
 echo.
 echo ============================================
-echo   Бэкенд    http://localhost:8000
-echo   Фронтенд  http://localhost:5173
+echo   Бэкенд    http://127.0.0.1:%BACKEND_PORT%
+echo   Фронтенд  http://127.0.0.1:%FRONTEND_PORT%
 echo ============================================
 echo.
 echo  Оба сервера запущены в отдельных окнах.

@@ -146,6 +146,13 @@ export default function InventoryDrawer({
         variant: 'ghost',
         onClick: () => onBenchParticipant(participant.id),
       },
+      ...(participant.isSavedProfile
+        ? [{
+            label: 'Удалить профиль',
+            variant: 'danger',
+            onClick: () => onDeleteProfile(participant.profileId),
+          }]
+        : []),
     ],
   }))
 
@@ -160,6 +167,13 @@ export default function InventoryDrawer({
         label: 'Вернуть',
         onClick: () => onRestoreParticipant(participant.id),
       },
+      ...(participant.isSavedProfile
+        ? [{
+            label: 'Удалить профиль',
+            variant: 'danger',
+            onClick: () => onDeleteProfile(participant.profileId),
+          }]
+        : []),
     ],
   }))
 

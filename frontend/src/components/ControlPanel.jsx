@@ -139,6 +139,7 @@ export default function ControlPanel({
   const pausePending = sessionState === 'pause_requested'
   const running = activeSession && !paused && !pausePending
   const editable = !activeSession || paused
+  const visibleSessionStatus = session?.status || sessionState
 
   const availableProviders = useMemo(
     () => Object.entries(providers).filter(([, value]) => value.available).map(([key]) => key),
@@ -225,7 +226,11 @@ export default function ControlPanel({
         <div className="toolbar-badges">
           <span className="toolbar-badge">{room?.name || 'Комната не выбрана'}</span>
           <span className={`toolbar-badge${observerBusy ? ' is-accent' : ''}`}>
-            {observerBusy ? 'Хрономант думает' : activeSession ? `Статус: ${getSessionStateLabel(sessionState)}` : 'Сессия не запущена'}
+            {observerBusy
+              ? 'Хрономант думает'
+              : visibleSessionStatus && visibleSessionStatus !== 'idle'
+                ? `Статус: ${getSessionStateLabel(visibleSessionStatus)}`
+                : 'Сессия не запущена'}
           </span>
         </div>
       </div>
