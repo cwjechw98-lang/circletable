@@ -1,3 +1,5 @@
+![Круглый стол ИИ](./assets/github-header.svg)
+
 # ⚔ КРУГЛЫЙ СТОЛ ИИ ⚔
 
 ```text
@@ -49,7 +51,7 @@
 Frontend:
 - `React`
 - `Vite`
-- пиксельный retro UI
+- пиксельный ретро-интерфейс
 
 Backend:
 - `FastAPI`

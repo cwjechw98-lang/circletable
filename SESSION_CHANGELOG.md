@@ -220,3 +220,11 @@
 - [backend/chronomancer.py](C:\REPO\circletable\backend\chronomancer.py)
 - [frontend/src/App.jsx](C:\REPO\circletable\frontend\src\App.jsx)
 - [frontend/src/components/ControlPanel.jsx](C:\REPO\circletable\frontend\src\components\ControlPanel.jsx)
+
+## 13. Дополнительная полировка GitHub и сценариев запуска
+
+После первичного push в GitHub было дополнительно сделано:
+- создан оформленный [README.md](C:\REPO\circletable\README.md) в стиле самой программы;
+- добавлен пиксельный баннер [assets/github-header.svg](C:\REPO\circletable\assets\github-header.svg);
+- локализованы [start.bat](C:\REPO\circletable\start.bat) и [start_core.bat](C:\REPO\circletable\start_core.bat);
+- [README_AI.md](C:\REPO\circletable\README_AI.md) обновлён с учётом новой стилизации GitHub и сценариев запуска.

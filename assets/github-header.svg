@@ -1,0 +1,38 @@
+<svg width="1280" height="360" viewBox="0 0 1280 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Круглый стол ИИ</title>
+  <desc id="desc">Пиксельный баннер проекта с неоновыми цветами в стиле интерфейса приложения.</desc>
+
+  <rect width="1280" height="360" fill="#0A0A12"/>
+  <rect x="24" y="24" width="1232" height="312" fill="#12121E" stroke="#A08030" stroke-width="8"/>
+  <rect x="40" y="40" width="1200" height="280" fill="#1A1A2E" stroke="#2A2A4A" stroke-width="4"/>
+
+  <rect x="64" y="64" width="1152" height="12" fill="#F0C040" opacity="0.25"/>
+  <rect x="64" y="284" width="1152" height="12" fill="#00F0F0" opacity="0.15"/>
+
+  <rect x="96" y="104" width="1088" height="152" rx="8" fill="#16213E" stroke="#F0C040" stroke-width="4"/>
+
+  <text x="640" y="154" text-anchor="middle" fill="#F0C040" font-size="52" font-family="'Courier New', monospace" font-weight="700" letter-spacing="6">
+    КРУГЛЫЙ СТОЛ ИИ
+  </text>
+  <text x="640" y="198" text-anchor="middle" fill="#E0E0E8" font-size="22" font-family="'Courier New', monospace" letter-spacing="2">
+    пиксельная арена для споров, раундов и хроник
+  </text>
+  <text x="640" y="232" text-anchor="middle" fill="#00F0F0" font-size="20" font-family="'Courier New', monospace" letter-spacing="3">
+    КОМНАТЫ  •  СЕССИИ  •  ХРОНОМАНТ  •  ИНВЕНТАРЬ
+  </text>
+
+  <rect x="120" y="122" width="18" height="18" fill="#00FF66"/>
+  <rect x="146" y="122" width="18" height="18" fill="#F0C040"/>
+  <rect x="172" y="122" width="18" height="18" fill="#FF00AA"/>
+
+  <rect x="1090" y="122" width="18" height="18" fill="#4488FF"/>
+  <rect x="1116" y="122" width="18" height="18" fill="#AA44FF"/>
+  <rect x="1142" y="122" width="18" height="18" fill="#FF8833"/>
+
+  <rect x="128" y="292" width="192" height="10" fill="#F0C040"/>
+  <rect x="960" y="292" width="192" height="10" fill="#F0C040"/>
+
+  <text x="640" y="307" text-anchor="middle" fill="#5A5A7A" font-size="16" font-family="'Courier New', monospace" letter-spacing="2">
+    НА СВЯЗИ  •  СТОЛ СОБРАН  •  МОЖНО ЗАПУСКАТЬ РАУНД
+  </text>
+</svg>
