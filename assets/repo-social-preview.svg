@@ -1,0 +1,33 @@
+<svg width="1280" height="640" viewBox="0 0 1280 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1280" height="640" fill="#0A0A12"/>
+  <rect x="24" y="24" width="1232" height="592" fill="#12121E" stroke="#A08030" stroke-width="8"/>
+  <rect x="52" y="52" width="1176" height="536" fill="#1A1A2E" stroke="#2A2A4A" stroke-width="4"/>
+
+  <rect x="88" y="94" width="1104" height="168" fill="#16213E" stroke="#F0C040" stroke-width="4"/>
+  <text x="640" y="160" text-anchor="middle" fill="#F0C040" font-size="64" font-family="'Courier New', monospace" font-weight="700" letter-spacing="6">
+    КРУГЛЫЙ СТОЛ ИИ
+  </text>
+  <text x="640" y="208" text-anchor="middle" fill="#E0E0E8" font-size="28" font-family="'Courier New', monospace" letter-spacing="2">
+    локальная игра-дискуссия с ролями, комнатами и наблюдателем
+  </text>
+
+  <rect x="96" y="326" width="330" height="176" fill="#16213E" stroke="#2A2A4A" stroke-width="4"/>
+  <rect x="475" y="326" width="330" height="176" fill="#16213E" stroke="#2A2A4A" stroke-width="4"/>
+  <rect x="854" y="326" width="330" height="176" fill="#16213E" stroke="#2A2A4A" stroke-width="4"/>
+
+  <text x="261" y="376" text-anchor="middle" fill="#00F0F0" font-size="24" font-family="'Courier New', monospace" font-weight="700">КОМНАТЫ И СЕССИИ</text>
+  <text x="261" y="418" text-anchor="middle" fill="#E0E0E8" font-size="18" font-family="'Courier New', monospace">пауза</text>
+  <text x="261" y="448" text-anchor="middle" fill="#E0E0E8" font-size="18" font-family="'Courier New', monospace">сохранение</text>
+
+  <text x="640" y="376" text-anchor="middle" fill="#FF00AA" font-size="24" font-family="'Courier New', monospace" font-weight="700">РОЛИ И ИНВЕНТАРЬ</text>
+  <text x="640" y="418" text-anchor="middle" fill="#E0E0E8" font-size="18" font-family="'Courier New', monospace">персонажи</text>
+  <text x="640" y="448" text-anchor="middle" fill="#E0E0E8" font-size="18" font-family="'Courier New', monospace">скамейка</text>
+
+  <text x="1019" y="376" text-anchor="middle" fill="#00FF66" font-size="24" font-family="'Courier New', monospace" font-weight="700">ХРОНОМАНТ</text>
+  <text x="1019" y="418" text-anchor="middle" fill="#E0E0E8" font-size="18" font-family="'Courier New', monospace">раундовый анализ</text>
+  <text x="1019" y="448" text-anchor="middle" fill="#E0E0E8" font-size="18" font-family="'Courier New', monospace">финализация</text>
+
+  <text x="640" y="566" text-anchor="middle" fill="#5A5A7A" font-size="18" font-family="'Courier New', monospace" letter-spacing="2">
+    REACT • FASTAPI • WEBSOCKET • SQLITE • OLLAMA
+  </text>
+</svg>

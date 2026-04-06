@@ -228,3 +228,12 @@
 - добавлен пиксельный баннер [assets/github-header.svg](C:\REPO\circletable\assets\github-header.svg);
 - локализованы [start.bat](C:\REPO\circletable\start.bat) и [start_core.bat](C:\REPO\circletable\start_core.bat);
 - [README_AI.md](C:\REPO\circletable\README_AI.md) обновлён с учётом новой стилизации GitHub и сценариев запуска.
+
+## 14. Визуальные ассеты для приложения, репозитория и релизов
+
+Дополнительно подготовлен отдельный набор оформления:
+- [frontend/public/favicon.svg](C:\REPO\circletable\frontend\public\favicon.svg) — favicon приложения;
+- [frontend/public/social-preview.svg](C:\REPO\circletable\frontend\public\social-preview.svg) — social preview карточка приложения;
+- [assets/repo-social-preview.svg](C:\REPO\circletable\assets\repo-social-preview.svg) — social preview для репозитория;
+- [RELEASE_README.md](C:\REPO\circletable\RELEASE_README.md) — отдельный релизный README;
+- [frontend/index.html](C:\REPO\circletable\frontend\index.html) обновлён мета-тегами `description`, `theme-color`, `og:*`, `twitter:*` и ссылкой на новый favicon.

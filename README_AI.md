@@ -32,6 +32,7 @@ Frontend:
 - [frontend/src/components/InventoryDrawer.jsx](C:\REPO\circletable\frontend\src\components\InventoryDrawer.jsx)
 - [frontend/src/components/ChatPanel.jsx](C:\REPO\circletable\frontend\src\components\ChatPanel.jsx)
 - [frontend/src/index.css](C:\REPO\circletable\frontend\src\index.css)
+- [frontend/index.html](C:\REPO\circletable\frontend\index.html)
 
 ## 3. Как запускать проект
 
@@ -383,7 +384,16 @@ Dry-run shutdown helper:
 powershell -ExecutionPolicy Bypass -File C:\REPO\circletable\shutdown_round_table.ps1 -DelaySeconds 0 -DryRun
 ```
 
-## 16. Последнее правило для следующего ИИ
+## 16. Визуальные ассеты
+
+Подготовленные файлы:
+- [assets/github-header.svg](C:\REPO\circletable\assets\github-header.svg)
+- [assets/repo-social-preview.svg](C:\REPO\circletable\assets\repo-social-preview.svg)
+- [frontend/public/social-preview.svg](C:\REPO\circletable\frontend\public\social-preview.svg)
+- [frontend/public/favicon.svg](C:\REPO\circletable\frontend\public\favicon.svg)
+- [RELEASE_README.md](C:\REPO\circletable\RELEASE_README.md)
+
+## 17. Последнее правило для следующего ИИ
 
 Если вносишь изменения в логику комнат, сессий, паузы, восстановления, выбора моделей или Хрономанта:
 - сначала обнови соответствующий раздел в этом файле;

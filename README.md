@@ -12,6 +12,8 @@
 `circletable` — это локальное приложение, в котором несколько ИИ-персонажей обсуждают заданную тему за виртуальным круглым столом.  
 У каждого персонажа есть характер, профессиональный профиль, модель и своя манера вести дискуссию.
 
+![Социальное превью репозитория](./assets/repo-social-preview.svg)
+
 Проект уже умеет не только запускать “бесконечный чат”, но и работать как полноценная игровая сессия:
 - с комнатами;
 - с сохранением состояния;
@@ -84,6 +86,16 @@ cd C:\REPO\circletable
 - попробует подготовить стартовую модель;
 - поднимет backend и frontend;
 - откроет приложение в браузере.
+
+## Медиа и оформление
+
+Для проекта уже подготовлены готовые визуальные ассеты:
+- [assets/github-header.svg](./assets/github-header.svg) — шапка репозитория
+- [assets/repo-social-preview.svg](./assets/repo-social-preview.svg) — карточка превью для GitHub / релизов
+- [frontend/public/social-preview.svg](./frontend/public/social-preview.svg) — карточка приложения
+- [frontend/public/favicon.svg](./frontend/public/favicon.svg) — favicon приложения
+
+Если репозиторий нужно оформить полностью, `assets/repo-social-preview.svg` можно использовать как основу для ручной загрузки в `GitHub → Settings → Social preview`.
 
 ## Полезные сценарии
 
@@ -162,6 +174,11 @@ Frontend:
 cd C:\REPO\circletable\frontend
 npm run build
 ```
+
+## Релизный текст
+
+Для публичного описания релиза подготовлен отдельный файл:
+- [RELEASE_README.md](./RELEASE_README.md)
 
 ## Текущий статус
 
