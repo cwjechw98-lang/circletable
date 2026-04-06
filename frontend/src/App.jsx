@@ -452,6 +452,7 @@ export default function App() {
         currentRoomId={currentRoomId}
         onClose={() => setRoomsOpen(false)}
         onLoadRoom={(roomId) => send({ type: 'load_room', roomId })}
+        onSessionSnapshot={applyRoomSnapshot}
         onCreateRoom={handleCreateRoom}
         onRenameRoom={handleRenameRoom}
         onDeleteRoom={handleDeleteRoom}

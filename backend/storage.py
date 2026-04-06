@@ -36,6 +36,7 @@ class Repository:
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._create_tables()
+        self._migrate_schema()
 
     def close(self):
         self.conn.close()
@@ -102,6 +103,7 @@ class Repository:
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
                 room_id TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
                 topic TEXT NOT NULL,
                 status TEXT NOT NULL,
                 observer_mode TEXT NOT NULL,
@@ -171,6 +173,15 @@ class Repository:
             """
         )
         self.conn.commit()
+
+    def _migrate_schema(self):
+        session_columns = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(sessions)").fetchall()
+        }
+        if "title" not in session_columns:
+            self.conn.execute("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+            self.conn.commit()
 
     def bootstrap(self, default_profiles: list[dict], observer_provider: str | None, observer_model: str | None):
         now = utc_now()
@@ -402,6 +413,7 @@ class Repository:
             return None
         return {
             "id": row["id"],
+            "title": row["title"],
             "topic": row["topic"],
             "status": row["status"],
             "observerMode": row["observer_mode"],
@@ -411,6 +423,8 @@ class Repository:
             "finalRoundPlanned": bool(row["final_round_planned"]),
             "extensionCount": row["extension_count"],
             "lastRoundNumber": row["last_round_number"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
             "startedAt": row["started_at"],
             "endedAt": row["ended_at"],
         }
@@ -466,7 +480,7 @@ class Repository:
         for room in rooms:
             latest_session = cur.execute(
                 """
-                SELECT id, topic, status, last_round_number, updated_at
+                SELECT id, title, topic, status, last_round_number, updated_at
                 FROM sessions
                 WHERE room_id = ?
                 ORDER BY updated_at DESC
@@ -486,6 +500,7 @@ class Repository:
                 "benchedCount": room["benched_count"],
                 "latestSession": {
                     "id": latest_session["id"],
+                    "title": latest_session["title"],
                     "topic": latest_session["topic"],
                     "status": latest_session["status"],
                     "lastRoundNumber": latest_session["last_round_number"],
@@ -499,6 +514,9 @@ class Repository:
             "SELECT * FROM character_profiles WHERE is_saved = 1 ORDER BY updated_at DESC, name ASC"
         ).fetchall()
         return [self._profile_payload(row) for row in rows]
+
+    def room_exists(self, room_id: str) -> bool:
+        return bool(self.conn.execute("SELECT 1 FROM rooms WHERE id = ?", (room_id,)).fetchone())
 
     def get_profile(self, profile_id: str) -> dict | None:
         row = self.conn.execute("SELECT * FROM character_profiles WHERE id = ?", (profile_id,)).fetchone()
@@ -606,6 +624,234 @@ class Repository:
             "messages": messages,
             "observerReviews": observer_reviews,
         }
+
+    def list_room_sessions(self, room_id: str, query: str = "", limit: int = 80) -> list[dict]:
+        search = (query or "").strip()
+        params: list[object] = [room_id]
+        where = "WHERE s.room_id = ?"
+        if search:
+            like = f"%{search}%"
+            where += """
+                AND (
+                    s.title LIKE ?
+                    OR s.topic LIKE ?
+                    OR EXISTS (
+                        SELECT 1
+                        FROM messages m
+                        WHERE m.session_id = s.id AND m.payload_json LIKE ?
+                    )
+                )
+            """
+            params.extend([like, like, like])
+        params.append(max(1, min(int(limit or 80), 200)))
+
+        rows = self.conn.execute(
+            f"""
+            SELECT
+                s.*,
+                (
+                    SELECT COUNT(*)
+                    FROM messages m
+                    WHERE m.session_id = s.id
+                ) AS message_count,
+                (
+                    SELECT COUNT(*)
+                    FROM rounds r
+                    WHERE r.session_id = s.id
+                ) AS round_count
+            FROM sessions s
+            {where}
+            ORDER BY s.updated_at DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+
+        result = []
+        for row in rows:
+            result.append({
+                **self._session_payload(row),
+                "messageCount": row["message_count"],
+                "roundCount": row["round_count"],
+                "preview": (row["chronicle"] or row["topic"] or "")[:220],
+            })
+        return result
+
+    def get_session_snapshot(self, session_id: str, *, make_current: bool = False) -> dict | None:
+        session = self.conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if not session:
+            return None
+        room_id = session["room_id"]
+        room = self.conn.execute("SELECT * FROM rooms WHERE id = ?", (room_id,)).fetchone()
+        if not room:
+            return None
+        if make_current:
+            self.set_current_room(room_id)
+            self.update_room_settings(room_id, current_session_id=session_id, last_topic=session["topic"])
+
+        active = self.conn.execute(
+            """
+            SELECT *
+            FROM room_participants
+            WHERE room_id = ? AND status = 'active'
+            ORDER BY position ASC, created_at ASC
+            """,
+            (room_id,),
+        ).fetchall()
+        benched = self.conn.execute(
+            """
+            SELECT *
+            FROM room_participants
+            WHERE room_id = ? AND status = 'benched'
+            ORDER BY updated_at DESC, created_at ASC
+            """,
+            (room_id,),
+        ).fetchall()
+        message_rows = self.conn.execute(
+            """
+            SELECT payload_json
+            FROM messages
+            WHERE session_id = ?
+            ORDER BY created_at ASC
+            LIMIT 800
+            """,
+            (session_id,),
+        ).fetchall()
+        review_rows = self.conn.execute(
+            """
+            SELECT *
+            FROM observer_reviews
+            WHERE session_id = ?
+            ORDER BY round_number DESC
+            LIMIT 24
+            """,
+            (session_id,),
+        ).fetchall()
+
+        return {
+            "room": {
+                "id": room["id"],
+                "name": room["name"],
+                "observerMode": room["observer_mode"],
+                "observerProvider": room["observer_provider"],
+                "observerModel": room["observer_model"],
+                "summary": room["summary"],
+                "lastTopic": room["last_topic"],
+            },
+            "participants": {
+                "active": [self._participant_payload(row) for row in active],
+                "benched": [self._participant_payload(row) for row in benched],
+            },
+            "inventory": self.list_saved_profiles(),
+            "session": self._session_payload(session),
+            "messages": [loads_json(row["payload_json"], {}) for row in message_rows],
+            "observerReviews": [
+                {
+                    "id": review["id"],
+                    "roundNumber": review["round_number"],
+                    "summary": review["summary"],
+                    "recommendation": review["recommendation"],
+                    "chronicleAfter": review["chronicle_after"],
+                    "comments": loads_json(review["comments_json"], {}),
+                    "achievements": loads_json(review["achievements_json"], []),
+                    "statsDelta": loads_json(review["stats_delta_json"], {}),
+                }
+                for review in review_rows
+            ],
+        }
+
+    def set_current_session(self, session_id: str) -> dict | None:
+        snapshot = self.get_session_snapshot(session_id, make_current=True)
+        return snapshot
+
+    def rename_session(self, session_id: str, title: str):
+        self.update_session(session_id, {"title": title.strip()})
+
+    def delete_session(self, session_id: str):
+        session = self.conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if not session:
+            return
+        room_id = session["room_id"]
+        self.conn.execute("DELETE FROM observer_reviews WHERE session_id = ?", (session_id,))
+        self.conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        self.conn.execute("DELETE FROM rounds WHERE session_id = ?", (session_id,))
+        self.conn.execute("DELETE FROM room_events WHERE session_id = ?", (session_id,))
+        self.conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+
+        room = self.conn.execute("SELECT current_session_id FROM rooms WHERE id = ?", (room_id,)).fetchone()
+        if room and room["current_session_id"] == session_id:
+            next_session = self.conn.execute(
+                """
+                SELECT id, topic
+                FROM sessions
+                WHERE room_id = ?
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (room_id,),
+            ).fetchone()
+            self.conn.execute(
+                "UPDATE rooms SET current_session_id = ?, last_topic = ?, updated_at = ? WHERE id = ?",
+                (
+                    next_session["id"] if next_session else None,
+                    next_session["topic"] if next_session else "",
+                    utc_now(),
+                    room_id,
+                ),
+            )
+        self.conn.commit()
+
+    def export_session_markdown(self, session_id: str) -> str | None:
+        snapshot = self.get_session_snapshot(session_id, make_current=False)
+        if not snapshot or not snapshot["session"]:
+            return None
+        session = snapshot["session"]
+        room = snapshot["room"]
+        title = session.get("title") or session["topic"] or "Сессия"
+        lines = [
+            f"# {title}",
+            "",
+            f"- Комната: {room['name']}",
+            f"- Статус: {session['status']}",
+            f"- Раундов: {session['lastRoundNumber']}",
+            f"- Старт: {session.get('startedAt') or session.get('createdAt') or ''}",
+            f"- Финал: {session.get('endedAt') or 'не завершена'}",
+            "",
+            "## Тема",
+            "",
+            session["topic"],
+            "",
+        ]
+        if session.get("chronicle"):
+            lines.extend(["## Хроника", "", session["chronicle"], ""])
+        lines.extend(["## Ход беседы", ""])
+
+        current_round = None
+        for message in snapshot["messages"]:
+            round_number = message.get("round")
+            if round_number and round_number != current_round:
+                current_round = round_number
+                lines.extend([f"### Раунд {current_round}", ""])
+            if message.get("type") == "round":
+                continue
+            name = message.get("name") or message.get("agent_name") or "Система"
+            role = message.get("role")
+            specialty = message.get("specialty")
+            meta = f" ({role} · {specialty})" if role and specialty else ""
+            content = (message.get("content") or "").strip()
+            if content:
+                lines.extend([f"**{name}{meta}:**", "", content, ""])
+
+        if snapshot["observerReviews"]:
+            lines.extend(["## Заметки Хрономанта", ""])
+            for review in reversed(snapshot["observerReviews"]):
+                lines.extend([
+                    f"### Раунд {review['roundNumber']}",
+                    "",
+                    review.get("summary") or "",
+                    "",
+                ])
+        return "\n".join(lines).strip() + "\n"
 
     def create_room(self, name: str, observer_mode: str, observer_provider: str | None, observer_model: str | None) -> str:
         room_id = make_id("room")
@@ -923,14 +1169,15 @@ class Repository:
         self.conn.execute(
             """
             INSERT INTO sessions (
-                id, room_id, topic, status, observer_mode, chronicle, wrap_requested,
+                id, room_id, title, topic, status, observer_mode, chronicle, wrap_requested,
                 final_requested, final_round_planned, extension_count, last_round_number,
                 created_at, updated_at, started_at, ended_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
                 room_id,
+                "",
                 topic,
                 "running",
                 observer_mode,
@@ -967,6 +1214,7 @@ class Repository:
         if not fields:
             return
         mapping = {
+            "title": "title",
             "topic": "topic",
             "status": "status",
             "observerMode": "observer_mode",

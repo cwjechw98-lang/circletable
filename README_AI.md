@@ -23,6 +23,7 @@ Backend:
 - [backend/debate.py](C:\REPO\circletable\backend\debate.py)
 - [backend/storage.py](C:\REPO\circletable\backend\storage.py)
 - [backend/chronomancer.py](C:\REPO\circletable\backend\chronomancer.py)
+- [backend/casting.py](C:\REPO\circletable\backend\casting.py)
 - [backend/defaults.py](C:\REPO\circletable\backend\defaults.py)
 
 Frontend:
@@ -30,6 +31,7 @@ Frontend:
 - [frontend/src/components/ControlPanel.jsx](C:\REPO\circletable\frontend\src\components\ControlPanel.jsx)
 - [frontend/src/components/RoomsDrawer.jsx](C:\REPO\circletable\frontend\src\components\RoomsDrawer.jsx)
 - [frontend/src/components/InventoryDrawer.jsx](C:\REPO\circletable\frontend\src\components\InventoryDrawer.jsx)
+- [frontend/src/components/CastingAssistantModal.jsx](C:\REPO\circletable\frontend\src\components\CastingAssistantModal.jsx)
 - [frontend/src/components/ChatPanel.jsx](C:\REPO\circletable\frontend\src\components\ChatPanel.jsx)
 - [frontend/src/index.css](C:\REPO\circletable\frontend\src\index.css)
 - [frontend/index.html](C:\REPO\circletable\frontend\index.html)
@@ -148,17 +150,27 @@ Frontend:
 - `GET /api/rooms/{roomId}`
 - `PATCH /api/rooms/{roomId}`
 - `DELETE /api/rooms/{roomId}`
+- `GET /api/rooms/{roomId}/sessions`
 - `GET /api/characters`
 - `POST /api/characters`
 - `PATCH /api/characters/{characterId}`
 - `DELETE /api/characters/{characterId}`
 - `GET /api/rooms/{roomId}/inventory`
+- `GET /api/sessions/{sessionId}`
+- `POST /api/sessions/{sessionId}/open`
+- `POST /api/sessions/{sessionId}/continue`
+- `PATCH /api/sessions/{sessionId}`
+- `DELETE /api/sessions/{sessionId}`
+- `GET /api/sessions/{sessionId}/export.md`
+- `POST /api/casting/suggest`
 
 ### WebSocket-команды
 
 Поддерживаются:
 - `get_providers`
 - `load_room`
+- `load_session`
+- `continue_session`
 - `start_session`
 - `pause_session`
 - `resume_session`
@@ -218,6 +230,24 @@ Frontend:
 - выбор комнаты;
 - переименование;
 - удаление.
+- раскрытие списка сохранённых диалогов внутри комнаты;
+- поиск по диалогам;
+- чтение завершённой или остановленной сессии без запуска генерации;
+- продолжение выбранной сессии;
+- переименование, удаление и экспорт диалога в Markdown.
+
+### Кастинг-помощник
+
+Файлы:
+- [backend/casting.py](C:\REPO\circletable\backend\casting.py)
+- [frontend/src/components/CastingAssistantModal.jsx](C:\REPO\circletable\frontend\src\components\CastingAssistantModal.jsx)
+
+Функции:
+- кнопка `Помощь` рядом с темой открывает окно подбора состава;
+- пользователь выбирает количество персонажей;
+- backend просит быструю модель предложить имена, роли, специализации, образы и краткие заметки;
+- перед посадкой за стол предложения можно отредактировать или удалить;
+- если модель недоступна, включается эвристический fallback-состав.
 
 ### Drawer инвентаря
 
@@ -250,6 +280,11 @@ Frontend:
 - создание нового персонажа;
 - отправка пользовательского вопроса;
 - ручное обновление списка моделей.
+
+Важно по смыслу кнопок:
+- `Закругляться` — мягкий сигнал участникам двигаться к выводу.
+- `Финальный раунд` — следующий раунд должен подвести итог; после завершения сессия остаётся в архиве комнаты.
+- `Остановить` — прервать текущую сессию на безопасной точке без финального раунда.
 
 ## 8. Текущая стратегия по моделям
 
@@ -341,19 +376,21 @@ Frontend:
 3. [backend/debate.py](C:\REPO\circletable\backend\debate.py)
 4. [backend/storage.py](C:\REPO\circletable\backend\storage.py)
 5. [backend/chronomancer.py](C:\REPO\circletable\backend\chronomancer.py)
-6. [backend/defaults.py](C:\REPO\circletable\backend\defaults.py)
-7. [frontend/src/App.jsx](C:\REPO\circletable\frontend\src\App.jsx)
-8. [frontend/src/components/ControlPanel.jsx](C:\REPO\circletable\frontend\src\components\ControlPanel.jsx)
-9. [frontend/src/components/InventoryDrawer.jsx](C:\REPO\circletable\frontend\src\components\InventoryDrawer.jsx)
-10. [frontend/src/components/RoomsDrawer.jsx](C:\REPO\circletable\frontend\src\components\RoomsDrawer.jsx)
+6. [backend/casting.py](C:\REPO\circletable\backend\casting.py)
+7. [backend/defaults.py](C:\REPO\circletable\backend\defaults.py)
+8. [frontend/src/App.jsx](C:\REPO\circletable\frontend\src\App.jsx)
+9. [frontend/src/components/ControlPanel.jsx](C:\REPO\circletable\frontend\src\components\ControlPanel.jsx)
+10. [frontend/src/components/InventoryDrawer.jsx](C:\REPO\circletable\frontend\src\components\InventoryDrawer.jsx)
+11. [frontend/src/components/RoomsDrawer.jsx](C:\REPO\circletable\frontend\src\components\RoomsDrawer.jsx)
+12. [frontend/src/components/CastingAssistantModal.jsx](C:\REPO\circletable\frontend\src\components\CastingAssistantModal.jsx)
 
 ## 13. Что ещё не доведено до идеала
 
 На момент создания файла стоит иметь в виду:
 - в базе могут оставаться старые исторические сообщения на английском, если они были сгенерированы до ужесточения русских промптов;
 - полный ручной прогон сценария `Завершить сеанс` ещё желательно сделать отдельно;
-- у проекта пока нет Git-истории в этой папке, поэтому ручной журнал изменений обязателен;
 - лаборатория персонажей, более глубокая meta-игра и расширенная долговременная RPG-эволюция пока не реализованы до конца.
+- экспорт сейчас реализован как Markdown; PDF/проводник сохранения ещё не добавлены.
 
 ## 14. Рекомендуемые следующие шаги
 
@@ -361,7 +398,7 @@ Frontend:
 - вручную прогнать сценарий `Завершить сеанс` до конца;
 - добавить отдельный экран/режим лаборатории персонажей;
 - сделать более явные карточки персонажей с историей наблюдений;
-- добавить экспорт комнаты или сессии в файл;
+- добавить экспорт комнаты целиком и, при необходимости, PDF-экспорт;
 - расширить тесты на сценарии паузы, восстановления и финального раунда;
 - при необходимости вычистить старые англоязычные исторические логи из базы.
 
@@ -370,7 +407,7 @@ Frontend:
 Backend:
 ```powershell
 cd C:\REPO\circletable\backend
-venv\Scripts\python.exe -m py_compile main.py debate.py storage.py chronomancer.py defaults.py agents.py
+venv\Scripts\python.exe -m py_compile main.py debate.py storage.py chronomancer.py casting.py defaults.py agents.py
 ```
 
 Frontend:

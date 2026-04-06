@@ -1,17 +1,31 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { getRoleLabel } from '../constants/roles.js'
 import { getSpecialtyLabel } from '../constants/specialties.js'
 
 export default function ChatPanel({ messages }) {
   const endRef = useRef(null)
+  const [autoScroll, setAutoScroll] = useState(true)
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length])
+    if (autoScroll) {
+      endRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [autoScroll, messages.length])
 
   return (
     <div className="chat-panel">
-      <div className="chat-header">Ход беседы</div>
+      <div className="chat-header">
+        <span>Ход беседы</span>
+        <button
+          type="button"
+          className={`chat-scroll-toggle${autoScroll ? ' is-active' : ''}`}
+          onClick={() => setAutoScroll((value) => !value)}
+          aria-pressed={autoScroll}
+          title="Если выключить, новые сообщения не будут уводить чат вниз во время чтения."
+        >
+          {autoScroll ? 'Автопрокрутка: вкл' : 'Автопрокрутка: выкл'}
+        </button>
+      </div>
 
       <div className="chat-messages">
         {messages.length === 0 && (

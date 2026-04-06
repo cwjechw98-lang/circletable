@@ -1,4 +1,16 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
+
+async function apiJson(path, options = {}) {
+  const response = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(text || `Ошибка запроса: ${response.status}`)
+  }
+  return response.json()
+}
 
 export default function RoomsDrawer({
   open,
@@ -6,11 +18,26 @@ export default function RoomsDrawer({
   currentRoomId,
   onClose,
   onLoadRoom,
+  onSessionSnapshot,
   onCreateRoom,
   onRenameRoom,
   onDeleteRoom,
 }) {
   const [newRoomName, setNewRoomName] = useState('')
+  const [expandedRoomId, setExpandedRoomId] = useState(null)
+  const [sessionQuery, setSessionQuery] = useState('')
+  const [sessionsByRoom, setSessionsByRoom] = useState({})
+  const [loadingRoomId, setLoadingRoomId] = useState(null)
+
+  useEffect(() => {
+    if (!open || !expandedRoomId) {
+      return
+    }
+    const handle = window.setTimeout(() => {
+      loadSessions(expandedRoomId, sessionQuery)
+    }, 180)
+    return () => window.clearTimeout(handle)
+  }, [expandedRoomId, open, sessionQuery])
 
   if (!open) {
     return null
@@ -34,6 +61,92 @@ export default function RoomsDrawer({
     if (window.confirm(`Удалить комнату «${room.name}»?`)) {
       onDeleteRoom(room.id)
     }
+  }
+
+  async function loadSessions(roomId, query = '') {
+    setLoadingRoomId(roomId)
+    try {
+      const params = new URLSearchParams()
+      if (query.trim()) {
+        params.set('query', query.trim())
+      }
+      const suffix = params.toString() ? `?${params}` : ''
+      const data = await apiJson(`/api/rooms/${roomId}/sessions${suffix}`)
+      setSessionsByRoom((current) => ({ ...current, [roomId]: data.sessions || [] }))
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setLoadingRoomId(null)
+    }
+  }
+
+  async function toggleSessions(roomId) {
+    const nextRoomId = expandedRoomId === roomId ? null : roomId
+    setExpandedRoomId(nextRoomId)
+    setSessionQuery('')
+    if (nextRoomId) {
+      await loadSessions(nextRoomId)
+    }
+  }
+
+  async function openSession(sessionId) {
+    try {
+      const snapshot = await apiJson(`/api/sessions/${sessionId}/open`, { method: 'POST' })
+      onSessionSnapshot(snapshot)
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  async function continueSession(sessionId) {
+    try {
+      const snapshot = await apiJson(`/api/sessions/${sessionId}/continue`, { method: 'POST' })
+      onSessionSnapshot(snapshot)
+      onClose()
+    } catch (error) {
+      console.error(error)
+      window.alert('Не удалось продолжить сессию. Возможно, уже идёт другой диалог.')
+    }
+  }
+
+  async function renameSession(session) {
+    const currentTitle = session.title || session.topic || 'Диалог'
+    const nextTitle = window.prompt('Новое имя диалога', currentTitle)
+    if (!nextTitle || !nextTitle.trim()) {
+      return
+    }
+    try {
+      const snapshot = await apiJson(`/api/sessions/${session.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title: nextTitle.trim() }),
+      })
+      onSessionSnapshot(snapshot)
+      if (expandedRoomId) {
+        await loadSessions(expandedRoomId, sessionQuery)
+      }
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  async function deleteSession(session) {
+    const title = session.title || session.topic || 'диалог'
+    if (!window.confirm(`Удалить диалог «${title}»?`)) {
+      return
+    }
+    try {
+      await apiJson(`/api/sessions/${session.id}`, { method: 'DELETE' })
+      if (expandedRoomId) {
+        await loadSessions(expandedRoomId, sessionQuery)
+      }
+    } catch (error) {
+      console.error(error)
+      window.alert('Не удалось удалить диалог. Возможно, он сейчас выполняется.')
+    }
+  }
+
+  function exportSession(sessionId) {
+    window.location.href = `/api/sessions/${sessionId}/export.md`
   }
 
   return (
@@ -92,6 +205,9 @@ export default function RoomsDrawer({
                   <button className="pixel-btn ghost" onClick={() => onLoadRoom(room.id)}>
                     {isCurrent ? 'Обновить' : 'Открыть'}
                   </button>
+                  <button className="pixel-btn ghost" onClick={() => toggleSessions(room.id)}>
+                    {expandedRoomId === room.id ? 'Скрыть диалоги' : 'Диалоги'}
+                  </button>
                   <button className="pixel-btn ghost" onClick={() => requestRename(room)}>
                     Переименовать
                   </button>
@@ -99,6 +215,65 @@ export default function RoomsDrawer({
                     Удалить
                   </button>
                 </div>
+
+                {expandedRoomId === room.id && (
+                  <div className="session-archive">
+                    <input
+                      className="drawer-input"
+                      value={sessionQuery}
+                      onChange={(event) => setSessionQuery(event.target.value)}
+                      placeholder="Поиск по диалогам"
+                    />
+
+                    {loadingRoomId === room.id && (
+                      <div className="drawer-empty">Загружаю диалоги...</div>
+                    )}
+
+                    {(sessionsByRoom[room.id] || []).length === 0 && loadingRoomId !== room.id && (
+                      <div className="drawer-empty">В этой комнате пока нет сохранённых диалогов.</div>
+                    )}
+
+                    {(sessionsByRoom[room.id] || []).map((session) => (
+                      <div key={session.id} className="session-card">
+                        <div className="session-card-top">
+                          <div>
+                            <div className="session-card-title">
+                              {session.title || `Диалог от ${new Date(session.createdAt).toLocaleString('ru-RU')}`}
+                            </div>
+                            <div className="session-card-topic">{session.topic}</div>
+                          </div>
+                          <span className="room-badge">
+                            {session.status === 'completed'
+                              ? 'Завершена'
+                              : session.status === 'stopped'
+                                ? 'Остановлена'
+                                : session.status === 'paused'
+                                  ? 'Пауза'
+                                  : 'Активна'}
+                          </span>
+                        </div>
+
+                        <div className="room-card-stats">
+                          <span>Раундов: {session.lastRoundNumber}</span>
+                          <span>Сообщений: {session.messageCount}</span>
+                          <span>{new Date(session.updatedAt).toLocaleString('ru-RU')}</span>
+                        </div>
+
+                        {session.preview && (
+                          <div className="session-preview">{session.preview}</div>
+                        )}
+
+                        <div className="room-card-actions">
+                          <button className="pixel-btn ghost" onClick={() => openSession(session.id)}>Читать</button>
+                          <button className="pixel-btn start" onClick={() => continueSession(session.id)}>Продолжить</button>
+                          <button className="pixel-btn ghost" onClick={() => renameSession(session)}>Переименовать</button>
+                          <button className="pixel-btn ghost" onClick={() => exportSession(session.id)}>Экспорт .md</button>
+                          <button className="pixel-btn danger" onClick={() => deleteSession(session)}>Удалить</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )
           })}

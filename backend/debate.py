@@ -84,6 +84,79 @@ class DebateEngine:
         self.repo.set_current_room(target_room_id)
         await self._broadcast_room_loaded(target_room_id)
 
+    async def load_session(self, session_id: str | None = None):
+        if not session_id:
+            return
+        snapshot = self.repo.get_session_snapshot(session_id)
+        if not snapshot:
+            await self._broadcast({"type": "error", "message": "Сессия не найдена."})
+            return
+        room_id = snapshot["room"]["id"]
+        if self.running and self._running_room_id and room_id != self._running_room_id:
+            await self._broadcast({
+                "type": "error",
+                "message": "Сначала завершите или поставьте на паузу текущую сессию, а потом открывайте другой диалог.",
+            })
+            return
+        snapshot = self.repo.set_current_session(session_id)
+        session = snapshot["session"] if snapshot else None
+        if not self.running and session:
+            self._running_room_id = room_id
+            self._running_session_id = None if session["status"] in {"completed", "stopped"} else session["id"]
+            self._state = session["status"]
+        await self._broadcast({
+            "type": "room_loaded",
+            "rooms": self.repo.list_rooms(),
+            "currentRoomId": room_id,
+            **snapshot,
+        })
+        await self._broadcast_session_state(session)
+
+    async def continue_session(self, session_id: str | None = None):
+        if not session_id:
+            return
+        snapshot = self.repo.get_session_snapshot(session_id)
+        if not snapshot:
+            await self._broadcast({"type": "error", "message": "Сессия не найдена."})
+            return
+        room_id = snapshot["room"]["id"]
+
+        if self.running:
+            await self.stop_session()
+
+        session = snapshot["session"]
+        self.repo.set_current_session(session_id)
+        self.repo.update_session(
+            session_id,
+            {
+                "status": "running",
+                "wrapRequested": 0,
+                "finalRequested": 0,
+                "finalRoundPlanned": 0,
+                "endedAt": None,
+            },
+        )
+        self.repo.add_room_event(room_id, session_id, "session_continued", {"fromStatus": session["status"]})
+        self._running_room_id = room_id
+        self._running_session_id = session_id
+        self._state = "running"
+        self._pause_requested = False
+        self._stop_requested = False
+        self._round_state = None
+        self._resume_event.set()
+        await self._append_and_broadcast(
+            room_id,
+            session_id,
+            {
+                "type": "status",
+                "content": "Сессия продолжена из архива.",
+            },
+            message_type="status",
+        )
+        await self._broadcast_room_loaded(room_id)
+        await self._broadcast_session_state()
+        self._task = asyncio.create_task(self._loop(room_id, session_id))
+
     async def start_session(self, topic: str | None = None, room_id: str | None = None, observer_mode: str | None = None):
         target_room_id = room_id or self.repo.get_current_room_id()
         if not target_room_id:

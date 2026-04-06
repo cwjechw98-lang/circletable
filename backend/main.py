@@ -11,7 +11,9 @@ from typing import Any
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 
+from casting import suggest_characters
 from debate import DebateEngine
 from defaults import build_default_profiles, pick_observer_provider
 from providers import PROVIDERS
@@ -183,6 +185,22 @@ async def shutdown_app():
     return {"ok": True}
 
 
+@app.post("/api/casting/suggest")
+async def suggest_casting(payload: dict):
+    topic = (payload.get("topic") or "").strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="Сначала введите тему или вопрос")
+
+    providers = await _providers_payload()
+    return await suggest_characters(
+        topic=topic,
+        count=payload.get("count"),
+        providers_payload=providers,
+        provider_name=payload.get("provider"),
+        model=payload.get("model"),
+    )
+
+
 @app.get("/api/rooms")
 async def list_rooms():
     return {
@@ -316,6 +334,102 @@ async def get_room_inventory(room_id: str):
     }
 
 
+@app.get("/api/rooms/{room_id}/sessions")
+async def list_room_sessions(room_id: str, query: str = ""):
+    if not repo().room_exists(room_id):
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+    return {"sessions": repo().list_room_sessions(room_id, query=query)}
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: str):
+    snapshot = repo().get_session_snapshot(session_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    return snapshot
+
+
+@app.post("/api/sessions/{session_id}/open")
+async def open_session(session_id: str):
+    snapshot = repo().set_current_session(session_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    payload = {
+        "rooms": repo().list_rooms(),
+        "currentRoomId": snapshot["room"]["id"],
+        **snapshot,
+    }
+    await manager.broadcast({"type": "room_loaded", **payload})
+    return payload
+
+
+@app.post("/api/sessions/{session_id}/continue")
+async def continue_session(session_id: str):
+    if debate_engine().running:
+        current_session_id = debate_engine().current_session_id
+        if current_session_id and current_session_id != session_id:
+            raise HTTPException(status_code=409, detail="Сначала остановите текущую сессию")
+    await debate_engine().continue_session(session_id)
+    snapshot = repo().get_session_snapshot(session_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    return {
+        "rooms": repo().list_rooms(),
+        "currentRoomId": snapshot["room"]["id"],
+        **snapshot,
+    }
+
+
+@app.patch("/api/sessions/{session_id}")
+async def patch_session(session_id: str, payload: dict):
+    if not repo().get_session(session_id):
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    repo().rename_session(session_id, payload.get("title") or "")
+    snapshot = repo().get_session_snapshot(session_id)
+    return {
+        "rooms": repo().list_rooms(),
+        "currentRoomId": snapshot["room"]["id"],
+        **snapshot,
+    }
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    if debate_engine().current_session_id == session_id and debate_engine().running:
+        raise HTTPException(status_code=409, detail="Сначала остановите текущую сессию")
+    session = repo().get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    snapshot = repo().get_session_snapshot(session_id)
+    room_id = snapshot["room"]["id"]
+    repo().delete_session(session_id)
+    current_room_id = repo().get_current_room_id()
+    current_snapshot = repo().get_room_snapshot(current_room_id) if current_room_id else None
+    await manager.broadcast({
+        "type": "room_loaded",
+        "rooms": repo().list_rooms(),
+        "currentRoomId": current_room_id,
+        "room": current_snapshot["room"] if current_snapshot else None,
+        "participants": current_snapshot["participants"] if current_snapshot else {"active": [], "benched": []},
+        "inventory": current_snapshot["inventory"] if current_snapshot else repo().list_saved_profiles(),
+        "session": current_snapshot["session"] if current_snapshot else None,
+        "messages": current_snapshot["messages"] if current_snapshot else [],
+        "observerReviews": current_snapshot["observerReviews"] if current_snapshot else [],
+    })
+    return {"ok": True, "roomId": room_id}
+
+
+@app.get("/api/sessions/{session_id}/export.md")
+async def export_session(session_id: str):
+    content = repo().export_session_markdown(session_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    headers = {
+        "Content-Disposition": f'attachment; filename="circletable-{session_id}.md"',
+    }
+    return PlainTextResponse(content, media_type="text/markdown; charset=utf-8", headers=headers)
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await manager.connect(ws)
@@ -338,6 +452,10 @@ async def ws_endpoint(ws: WebSocket):
                 }, ensure_ascii=False))
             elif action == "load_room":
                 await debate_engine().load_room(msg.get("roomId"))
+            elif action == "load_session":
+                await debate_engine().load_session(msg.get("sessionId"))
+            elif action == "continue_session":
+                await debate_engine().continue_session(msg.get("sessionId"))
             elif action == "start_session":
                 await debate_engine().start_session(
                     topic=msg.get("topic"),
