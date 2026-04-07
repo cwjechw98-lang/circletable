@@ -38,6 +38,39 @@ class DebateEngine:
         self._stop_requested = False
         self._round_state: RoundState | None = None
 
+    def _density_profile(self, room_id: str | None) -> dict[str, float]:
+        snapshot = self.repo.get_room_snapshot(room_id) if room_id else None
+        density = (snapshot or {}).get("room", {}).get("densityMode") or "normal"
+        if density == "calm":
+            return {
+                "countdown": 3.8,
+                "pre_turn_min": 0.55,
+                "pre_turn_max": 1.05,
+                "pre_generation_min": 1.0,
+                "pre_generation_max": 1.65,
+                "between_turn_min": 0.75,
+                "between_turn_max": 1.2,
+            }
+        if density == "stage":
+            return {
+                "countdown": 2.2,
+                "pre_turn_min": 0.22,
+                "pre_turn_max": 0.55,
+                "pre_generation_min": 0.45,
+                "pre_generation_max": 0.9,
+                "between_turn_min": 0.25,
+                "between_turn_max": 0.55,
+            }
+        return {
+            "countdown": 3.0,
+            "pre_turn_min": 0.35,
+            "pre_turn_max": 0.85,
+            "pre_generation_min": 0.8,
+            "pre_generation_max": 1.4,
+            "between_turn_min": 0.5,
+            "between_turn_max": 0.9,
+        }
+
     @property
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
@@ -486,8 +519,10 @@ class DebateEngine:
                     order = active[:]
                     random.shuffle(order)
                     self._round_state = RoundState(round_id=round_id, round_number=round_number, order=order)
-                    await self._broadcast({"type": "countdown", "round": round_number, "seconds": 3})
-                    await asyncio.sleep(3.1)
+                    density = self._density_profile(room_id)
+                    countdown = density["countdown"]
+                    await self._broadcast({"type": "countdown", "round": round_number, "seconds": round(countdown)})
+                    await asyncio.sleep(countdown + 0.1)
                     await self._broadcast({"type": "round_start", "round": round_number})
 
                 while self._round_state and self._round_state.next_index < len(self._round_state.order):
@@ -504,7 +539,8 @@ class DebateEngine:
                         break
 
                     if self._round_state.next_index < len(self._round_state.order):
-                        await asyncio.sleep(random.uniform(0.5, 0.9))
+                        density = self._density_profile(room_id)
+                        await asyncio.sleep(random.uniform(density["between_turn_min"], density["between_turn_max"]))
 
                 if self._stop_requested:
                     break
@@ -552,7 +588,8 @@ class DebateEngine:
         await self._resume_event.wait()
 
     async def _agent_turn(self, room_id: str, session_id: str, round_id: str, round_number: int, participant: dict):
-        await asyncio.sleep(random.uniform(0.35, 0.85))
+        density = self._density_profile(room_id)
+        await asyncio.sleep(random.uniform(density["pre_turn_min"], density["pre_turn_max"]))
         if self._stop_requested:
             return
 
@@ -561,7 +598,7 @@ class DebateEngine:
             "agent_id": participant["id"],
         })
 
-        await asyncio.sleep(random.uniform(0.8, 1.4))
+        await asyncio.sleep(random.uniform(density["pre_generation_min"], density["pre_generation_max"]))
         if self._stop_requested:
             return
 
@@ -723,6 +760,8 @@ class DebateEngine:
             "type": "round_completed",
             "round": round_state.round_number,
             "summary": review["roundSummary"],
+            "progress": review.get("progress", {}),
+            "finalReason": review.get("finalReason", ""),
         })
         await self._broadcast({
             "type": "observer_review_completed",
@@ -739,8 +778,10 @@ class DebateEngine:
             await self._broadcast({
                 "type": "observer_suggestion",
                 "recommendation": recommendation,
-                "summary": review.get("tableComment") or review["roundSummary"],
+                "summary": review.get("finalReason") or review.get("tableComment") or review["roundSummary"],
                 "suggestedRoundsLeft": review.get("suggestedRoundsLeft"),
+                "progress": review.get("progress", {}),
+                "missingExpertHint": review.get("missingExpertHint", ""),
             })
 
         if should_complete:
@@ -791,11 +832,13 @@ class DebateEngine:
             "topic": session["topic"] if session else "",
             "room_summary": (snapshot or {}).get("room", {}).get("summary", ""),
             "session_chronicle": session["chronicle"] if session else "",
+            "density_mode": (snapshot or {}).get("room", {}).get("densityMode", "normal"),
             "history": history,
             "wrap_signal": bool(session and session["wrapRequested"]),
             "final_signal": bool(session and session["finalRoundPlanned"]),
             "round_number": round_number,
             "active_participants": (snapshot or {}).get("participants", {}).get("active", []),
+            "pinned_highlights": (snapshot or {}).get("pinnedMessages", []),
         }
 
     async def _append_and_broadcast(self, room_id: str | None, session_id: str | None, payload: dict, *, round_id: str | None = None, round_number: int | None = None, message_type: str = "status", author_type: str = "system", participant_id: str | None = None):

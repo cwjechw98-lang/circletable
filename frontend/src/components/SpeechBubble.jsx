@@ -1,12 +1,83 @@
-import React from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useTypewriter } from '../hooks/useTypewriter.js'
 
 /**
- * Dynamic speech bubble with typewriter effect.
- * Positioned above/beside the mascot based on table position.
+ * Dynamic speech bubble with staged appearance and graceful exit.
  */
-export default function SpeechBubble({ text, isThinking, position }) {
-  const { displayed, done } = useTypewriter(text, 28)
+const DENSITY_CONFIG = {
+  calm: { lingerMs: 1700, exitMs: 360, speed: 30 },
+  normal: { lingerMs: 1400, exitMs: 320, speed: 24 },
+  stage: { lingerMs: 950, exitMs: 220, speed: 18 },
+}
+
+export default function SpeechBubble({ text, isThinking, isSpeaking, position, densityMode = 'normal' }) {
+  const [storedText, setStoredText] = useState('')
+  const [phase, setPhase] = useState('hidden')
+  const [pendingClose, setPendingClose] = useState(false)
+  const lingerTimerRef = useRef(0)
+  const exitTimerRef = useRef(0)
+  const density = DENSITY_CONFIG[densityMode] || DENSITY_CONFIG.normal
+
+  useEffect(() => {
+    if (text) {
+      setStoredText(text)
+    }
+  }, [text])
+
+  const { displayed, done } = useTypewriter(storedText, density.speed)
+  const hasLiveText = Boolean(text)
+  const hasStoredText = Boolean(storedText)
+
+  useEffect(() => {
+    clearTimeout(lingerTimerRef.current)
+    clearTimeout(exitTimerRef.current)
+
+    if (isThinking && !hasLiveText) {
+      setStoredText('')
+      setPendingClose(false)
+      setPhase('thinking')
+      return undefined
+    }
+
+    if (hasLiveText) {
+      setPendingClose(false)
+      setPhase('typing')
+      return undefined
+    }
+
+    if (hasStoredText && !isThinking && !isSpeaking) {
+      setPendingClose(true)
+      return undefined
+    }
+
+    if (!hasStoredText) {
+      setPendingClose(false)
+      setPhase('hidden')
+    }
+
+    return undefined
+  }, [hasLiveText, hasStoredText, isSpeaking, isThinking])
+
+  useEffect(() => {
+    if (!pendingClose || !hasStoredText || !done) {
+      return undefined
+    }
+
+    setPhase('linger')
+    lingerTimerRef.current = window.setTimeout(() => {
+      setPhase('exiting')
+      exitTimerRef.current = window.setTimeout(() => {
+        setStoredText('')
+        setPendingClose(false)
+        setPhase('hidden')
+      }, density.exitMs)
+    }, density.lingerMs)
+
+    return () => {
+      clearTimeout(lingerTimerRef.current)
+      clearTimeout(exitTimerRef.current)
+    }
+  }, [density.exitMs, density.lingerMs, done, hasStoredText, pendingClose])
 
   // Position bubble to avoid going off-screen
   // If agent is on top half → show below, else above
@@ -37,7 +108,7 @@ export default function SpeechBubble({ text, isThinking, position }) {
   const placementClass = isTop ? 'bubble-below' : 'bubble-above'
   const alignClass = isLeft ? 'bubble-left' : isRight ? 'bubble-right' : 'bubble-center'
 
-  if (isThinking && !text) {
+  if (phase === 'thinking') {
     return (
       <div className={`speech-bubble is-thinking ${placementClass} ${alignClass}`} style={style}>
         <span className="thinking-dots">
@@ -49,7 +120,7 @@ export default function SpeechBubble({ text, isThinking, position }) {
     )
   }
 
-  if (!text) return null
+  if (phase === 'hidden' || !storedText) return null
 
   // Truncate for bubble display
   const maxLen = 150
@@ -57,10 +128,12 @@ export default function SpeechBubble({ text, isThinking, position }) {
     ? '…' + displayed.slice(-maxLen)
     : displayed
 
+  const phaseClass = phase === 'exiting' ? 'is-exiting' : phase === 'linger' ? 'is-lingering' : ''
+
   return (
-    <div className={`speech-bubble ${placementClass} ${alignClass}`} style={style}>
+    <div className={`speech-bubble ${placementClass} ${alignClass} ${phaseClass}`.trim()} style={style}>
       <span>{truncated}</span>
-      {!done && <span className="typewriter-cursor" />}
+      {(phase === 'typing' || !done) && <span className="typewriter-cursor" />}
     </div>
   )
 }

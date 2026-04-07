@@ -74,6 +74,7 @@ class Repository:
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 observer_mode TEXT NOT NULL DEFAULT 'suggest',
+                density_mode TEXT NOT NULL DEFAULT 'normal',
                 observer_provider TEXT,
                 observer_model TEXT,
                 current_session_id TEXT,
@@ -168,7 +169,27 @@ class Repository:
                 comments_json TEXT NOT NULL,
                 achievements_json TEXT NOT NULL,
                 stats_delta_json TEXT NOT NULL,
+                progress_json TEXT NOT NULL DEFAULT '{}',
+                final_reason TEXT NOT NULL DEFAULT '',
+                missing_expert_hint TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS pinned_messages (
+                id TEXT PRIMARY KEY,
+                room_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(session_id, message_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS team_presets (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                participants_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             );
             """
         )
@@ -181,6 +202,28 @@ class Repository:
         }
         if "title" not in session_columns:
             self.conn.execute("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+            self.conn.commit()
+
+        room_columns = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(rooms)").fetchall()
+        }
+        if "density_mode" not in room_columns:
+            self.conn.execute("ALTER TABLE rooms ADD COLUMN density_mode TEXT NOT NULL DEFAULT 'normal'")
+            self.conn.commit()
+
+        review_columns = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(observer_reviews)").fetchall()
+        }
+        if "progress_json" not in review_columns:
+            self.conn.execute("ALTER TABLE observer_reviews ADD COLUMN progress_json TEXT NOT NULL DEFAULT '{}'")
+            self.conn.commit()
+        if "final_reason" not in review_columns:
+            self.conn.execute("ALTER TABLE observer_reviews ADD COLUMN final_reason TEXT NOT NULL DEFAULT ''")
+            self.conn.commit()
+        if "missing_expert_hint" not in review_columns:
+            self.conn.execute("ALTER TABLE observer_reviews ADD COLUMN missing_expert_hint TEXT NOT NULL DEFAULT ''")
             self.conn.commit()
 
     def bootstrap(self, default_profiles: list[dict], observer_provider: str | None, observer_model: str | None):
@@ -286,14 +329,15 @@ class Repository:
             cur.execute(
                 """
                 INSERT INTO rooms (
-                    id, name, observer_mode, observer_provider, observer_model,
+                    id, name, observer_mode, density_mode, observer_provider, observer_model,
                     current_session_id, summary, last_topic, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     room_id,
                     "Главная комната",
                     "suggest",
+                    "normal",
                     observer_provider,
                     observer_model,
                     None,
@@ -492,6 +536,7 @@ class Repository:
                 "id": room["id"],
                 "name": room["name"],
                 "observerMode": room["observer_mode"],
+                "densityMode": room["density_mode"],
                 "observerProvider": room["observer_provider"],
                 "observerModel": room["observer_model"],
                 "summary": room["summary"],
@@ -514,6 +559,122 @@ class Repository:
             "SELECT * FROM character_profiles WHERE is_saved = 1 ORDER BY updated_at DESC, name ASC"
         ).fetchall()
         return [self._profile_payload(row) for row in rows]
+
+    def list_team_presets(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM team_presets ORDER BY updated_at DESC, name ASC"
+        ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "participants": loads_json(row["participants_json"], []),
+                "createdAt": row["created_at"],
+                "updatedAt": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+    def create_team_preset(self, name: str, participants: list[dict]) -> dict:
+        preset_id = make_id("preset")
+        now = utc_now()
+        payload = [
+            {
+                "profileId": item.get("profileId"),
+                "name": item.get("name"),
+                "role": item.get("role"),
+                "specialty": item.get("specialty"),
+                "provider": item.get("provider"),
+                "model": item.get("model"),
+                "emoji": item.get("emoji"),
+                "mascot": item.get("mascot"),
+            }
+            for item in participants
+        ]
+        self.conn.execute(
+            """
+            INSERT INTO team_presets (id, name, participants_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (preset_id, name, dumps_json(payload), now, now),
+        )
+        self.conn.commit()
+        return {
+            "id": preset_id,
+            "name": name,
+            "participants": payload,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+
+    def delete_team_preset(self, preset_id: str):
+        self.conn.execute("DELETE FROM team_presets WHERE id = ?", (preset_id,))
+        self.conn.commit()
+
+    def _insert_room_participant(self, room_id: str, participant: dict, status: str = "active") -> str:
+        participant_id = make_id("seat")
+        now = utc_now()
+        position = self._next_active_position(room_id) if status == "active" else 0
+        self.conn.execute(
+            """
+            INSERT INTO room_participants (
+                id, room_id, profile_id, status, position,
+                name, role, specialty, provider, model, emoji, mascot,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                participant_id,
+                room_id,
+                participant.get("profileId") or make_id("char"),
+                status,
+                position,
+                participant["name"],
+                participant["role"],
+                participant["specialty"],
+                participant["provider"],
+                participant["model"],
+                participant["emoji"],
+                participant["mascot"],
+                now,
+                now,
+            ),
+        )
+        self.conn.commit()
+        return participant_id
+
+    def apply_team_preset(self, room_id: str, preset_id: str) -> list[dict]:
+        row = self.conn.execute("SELECT * FROM team_presets WHERE id = ?", (preset_id,)).fetchone()
+        if not row:
+            return []
+        preset_participants = loads_json(row["participants_json"], [])
+        for participant in self.get_active_participants(room_id):
+            self.bench_participant(participant["id"])
+        created: list[dict] = []
+        for entry in preset_participants:
+            participant_id = None
+            profile_id = entry.get("profileId")
+            if profile_id:
+                participant_id = self.add_participant_from_profile(room_id, profile_id, status="active")
+                if participant_id:
+                    self.update_participant(
+                        participant_id,
+                        {
+                            "name": entry.get("name"),
+                            "role": entry.get("role"),
+                            "specialty": entry.get("specialty"),
+                            "provider": entry.get("provider"),
+                            "model": entry.get("model"),
+                            "emoji": entry.get("emoji"),
+                            "mascot": entry.get("mascot"),
+                        },
+                    )
+            if not participant_id:
+                participant_id = self._insert_room_participant(room_id, entry, status="active")
+            created_participant = self.get_participant(participant_id)
+            if created_participant:
+                created.append(created_participant)
+        return created
 
     def room_exists(self, room_id: str) -> bool:
         return bool(self.conn.execute("SELECT 1 FROM rooms WHERE id = ?", (room_id,)).fetchone())
@@ -568,6 +729,7 @@ class Repository:
 
         messages = []
         observer_reviews = []
+        pinned_messages = []
         if current_session:
             message_rows = self.conn.execute(
                 """
@@ -579,7 +741,13 @@ class Repository:
                 """,
                 (current_session["id"],),
             ).fetchall()
-            messages = [loads_json(row["payload_json"], {}) for row in message_rows]
+            pinned_lookup = {item.get("id") for item in self.list_pinned_messages(current_session["id"])}
+            messages = []
+            for row in message_rows:
+                payload = loads_json(row["payload_json"], {})
+                payload["pinned"] = payload.get("id") in pinned_lookup
+                messages.append(payload)
+            pinned_messages = self.list_pinned_messages(current_session["id"])
 
             review_rows = self.conn.execute(
                 """
@@ -601,6 +769,9 @@ class Repository:
                     "comments": loads_json(review["comments_json"], {}),
                     "achievements": loads_json(review["achievements_json"], []),
                     "statsDelta": loads_json(review["stats_delta_json"], {}),
+                    "progress": loads_json(review["progress_json"], {}),
+                    "finalReason": review["final_reason"],
+                    "missingExpertHint": review["missing_expert_hint"],
                 }
                 for review in review_rows
             ]
@@ -610,6 +781,7 @@ class Repository:
                 "id": room["id"],
                 "name": room["name"],
                 "observerMode": room["observer_mode"],
+                "densityMode": room["density_mode"],
                 "observerProvider": room["observer_provider"],
                 "observerModel": room["observer_model"],
                 "summary": room["summary"],
@@ -620,8 +792,10 @@ class Repository:
                 "benched": [self._participant_payload(row) for row in benched],
             },
             "inventory": self.list_saved_profiles(),
+            "teamPresets": self.list_team_presets(),
             "session": self._session_payload(current_session) if current_session else None,
             "messages": messages,
+            "pinnedMessages": pinned_messages,
             "observerReviews": observer_reviews,
         }
 
@@ -727,12 +901,20 @@ class Repository:
             """,
             (session_id,),
         ).fetchall()
+        pinned_messages = self.list_pinned_messages(session_id)
+        pinned_lookup = {item.get("id") for item in pinned_messages}
+        messages = []
+        for row in message_rows:
+            payload = loads_json(row["payload_json"], {})
+            payload["pinned"] = payload.get("id") in pinned_lookup
+            messages.append(payload)
 
         return {
             "room": {
                 "id": room["id"],
                 "name": room["name"],
                 "observerMode": room["observer_mode"],
+                "densityMode": room["density_mode"],
                 "observerProvider": room["observer_provider"],
                 "observerModel": room["observer_model"],
                 "summary": room["summary"],
@@ -743,8 +925,10 @@ class Repository:
                 "benched": [self._participant_payload(row) for row in benched],
             },
             "inventory": self.list_saved_profiles(),
+            "teamPresets": self.list_team_presets(),
             "session": self._session_payload(session),
-            "messages": [loads_json(row["payload_json"], {}) for row in message_rows],
+            "messages": messages,
+            "pinnedMessages": pinned_messages,
             "observerReviews": [
                 {
                     "id": review["id"],
@@ -755,6 +939,9 @@ class Repository:
                     "comments": loads_json(review["comments_json"], {}),
                     "achievements": loads_json(review["achievements_json"], []),
                     "statsDelta": loads_json(review["stats_delta_json"], {}),
+                    "progress": loads_json(review["progress_json"], {}),
+                    "finalReason": review["final_reason"],
+                    "missingExpertHint": review["missing_expert_hint"],
                 }
                 for review in review_rows
             ],
@@ -824,6 +1011,12 @@ class Repository:
         ]
         if session.get("chronicle"):
             lines.extend(["## Хроника", "", session["chronicle"], ""])
+        if snapshot.get("pinnedMessages"):
+            lines.extend(["## Зацепки", ""])
+            for item in snapshot["pinnedMessages"]:
+                name = item.get("name") or item.get("agent_name") or "Участник"
+                lines.extend([f"- **{name}:** {item.get('content', '').strip()}"])
+            lines.append("")
         lines.extend(["## Ход беседы", ""])
 
         current_round = None
@@ -851,19 +1044,65 @@ class Repository:
                     review.get("summary") or "",
                     "",
                 ])
+                if review.get("finalReason"):
+                    lines.extend([f"_Причина финала:_ {review['finalReason']}", ""])
         return "\n".join(lines).strip() + "\n"
 
-    def create_room(self, name: str, observer_mode: str, observer_provider: str | None, observer_model: str | None) -> str:
+    def create_session_from_final(self, source_session_id: str) -> dict | None:
+        source = self.conn.execute("SELECT * FROM sessions WHERE id = ?", (source_session_id,)).fetchone()
+        if not source:
+            return None
+        room = self.conn.execute("SELECT * FROM rooms WHERE id = ?", (source["room_id"],)).fetchone()
+        if not room:
+            return None
+
+        now = utc_now()
+        session_id = make_id("session")
+        source_title = source["title"] or source["topic"] or "Финал"
+        next_title = f"Продолжение — {source_title}"[:120]
+        next_chronicle = source["chronicle"] or source["topic"]
+        self.conn.execute(
+            """
+            INSERT INTO sessions (
+                id, room_id, title, topic, status, observer_mode, chronicle, wrap_requested,
+                final_requested, final_round_planned, extension_count, last_round_number,
+                created_at, updated_at, started_at, ended_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                source["room_id"],
+                next_title,
+                source["topic"],
+                "paused",
+                source["observer_mode"],
+                next_chronicle,
+                0,
+                0,
+                0,
+                0,
+                0,
+                now,
+                now,
+                now,
+                None,
+            ),
+        )
+        self.conn.commit()
+        self.update_room_settings(source["room_id"], current_session_id=session_id, last_topic=source["topic"])
+        return self.get_session(session_id)
+
+    def create_room(self, name: str, observer_mode: str, observer_provider: str | None, observer_model: str | None, density_mode: str = "normal") -> str:
         room_id = make_id("room")
         now = utc_now()
         self.conn.execute(
             """
             INSERT INTO rooms (
-                id, name, observer_mode, observer_provider, observer_model,
+                id, name, observer_mode, density_mode, observer_provider, observer_model,
                 current_session_id, summary, last_topic, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (room_id, name, observer_mode, observer_provider, observer_model, None, "", "", now, now),
+            (room_id, name, observer_mode, density_mode, observer_provider, observer_model, None, "", "", now, now),
         )
         self.conn.commit()
         self.set_current_room(room_id)
@@ -1130,7 +1369,7 @@ class Repository:
                 {"status": "active", "position": self._next_active_position(row["room_id"])},
             )
 
-    def update_room_settings(self, room_id: str, *, name: str | None = None, observer_mode: str | None = None, observer_provider: str | None = None, observer_model: str | None = None, summary: str | None = None, last_topic: str | None = None, current_session_id: str | None = None):
+    def update_room_settings(self, room_id: str, *, name: str | None = None, observer_mode: str | None = None, density_mode: str | None = None, observer_provider: str | None = None, observer_model: str | None = None, summary: str | None = None, last_topic: str | None = None, current_session_id: str | None = None):
         updates = []
         values: list[object] = []
         if name is not None:
@@ -1139,6 +1378,9 @@ class Repository:
         if observer_mode is not None:
             updates.append("observer_mode = ?")
             values.append(observer_mode)
+        if density_mode is not None:
+            updates.append("density_mode = ?")
+            values.append(density_mode)
         if observer_provider is not None:
             updates.append("observer_provider = ?")
             values.append(observer_provider)
@@ -1182,6 +1424,40 @@ class Repository:
                 "running",
                 observer_mode,
                 "",
+                0,
+                0,
+                0,
+                0,
+                0,
+                now,
+                now,
+                now,
+                None,
+            ),
+        )
+        self.conn.commit()
+        self.update_room_settings(room_id, current_session_id=session_id, last_topic=topic)
+        return self.get_session(session_id)
+
+    def create_session_with_seed(self, room_id: str, topic: str, observer_mode: str, chronicle: str, status: str = "paused", title: str = "") -> dict:
+        now = utc_now()
+        session_id = make_id("session")
+        self.conn.execute(
+            """
+            INSERT INTO sessions (
+                id, room_id, title, topic, status, observer_mode, chronicle, wrap_requested,
+                final_requested, final_round_planned, extension_count, last_round_number,
+                created_at, updated_at, started_at, ended_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                room_id,
+                title,
+                topic,
+                status,
+                observer_mode,
+                chronicle,
                 0,
                 0,
                 0,
@@ -1372,8 +1648,9 @@ class Repository:
             INSERT INTO observer_reviews (
                 id, room_id, session_id, round_id, round_number, summary,
                 chronicle_before, chronicle_after, recommendation, suggested_rounds_left,
-                comments_json, achievements_json, stats_delta_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                comments_json, achievements_json, stats_delta_json, progress_json, final_reason,
+                missing_expert_hint, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 make_id("review"),
@@ -1389,6 +1666,9 @@ class Repository:
                 dumps_json(review.get("participantComments", {})),
                 dumps_json(review.get("achievements", [])),
                 dumps_json(review.get("statsDelta", {})),
+                dumps_json(review.get("progress", {})),
+                review.get("finalReason", ""),
+                review.get("missingExpertHint", ""),
                 utc_now(),
             ),
         )
@@ -1405,3 +1685,40 @@ class Repository:
                 stats[key] = max(0, min(100, current + int(change)))
             note = comments.get(profile_id) or row["last_note"]
             self.update_profile(profile_id, {"stats": stats, "lastNote": note})
+
+    def list_pinned_messages(self, session_id: str) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT m.payload_json
+            FROM pinned_messages p
+            JOIN messages m ON m.id = p.message_id
+            WHERE p.session_id = ?
+            ORDER BY p.created_at ASC
+            """,
+            (session_id,),
+        ).fetchall()
+        return [loads_json(row["payload_json"], {}) for row in rows]
+
+    def toggle_message_pin(self, room_id: str, session_id: str, message_id: str) -> dict:
+        existing = self.conn.execute(
+            "SELECT id FROM pinned_messages WHERE session_id = ? AND message_id = ?",
+            (session_id, message_id),
+        ).fetchone()
+        pinned = False
+        if existing:
+            self.conn.execute("DELETE FROM pinned_messages WHERE id = ?", (existing["id"],))
+        else:
+            self.conn.execute(
+                """
+                INSERT INTO pinned_messages (id, room_id, session_id, message_id, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (make_id("pin"), room_id, session_id, message_id, utc_now()),
+            )
+            pinned = True
+        self.conn.commit()
+        return {
+            "pinned": pinned,
+            "messageId": message_id,
+            "pinnedMessages": self.list_pinned_messages(session_id),
+        }

@@ -1,45 +1,61 @@
 import { useState, useEffect, useRef } from 'react'
 
 /**
- * Typewriter effect for streaming text.
- * When `text` grows (new tokens arrive), displayed text catches up at `speed` ms/char.
- * When `text` changes entirely (reset), starts fresh.
+ * Typewriter effect with a steady visual pace.
+ * Incoming tokens may arrive in bursts, but the reveal stays smooth.
  */
-export function useTypewriter(text, speed = 18) {
+export function useTypewriter(text, speed = 24) {
   const [displayed, setDisplayed] = useState('')
   const indexRef = useRef(0)
-  const prevTextRef = useRef('')
+  const targetRef = useRef('')
+  const tickRef = useRef(0)
+  const rafRef = useRef(0)
 
   useEffect(() => {
-    // Full reset
     if (!text) {
       setDisplayed('')
       indexRef.current = 0
-      prevTextRef.current = ''
+      targetRef.current = ''
+      tickRef.current = 0
+      cancelAnimationFrame(rafRef.current)
       return
     }
 
-    // If text grew (streaming), keep catching up
-    if (text.startsWith(prevTextRef.current)) {
-      prevTextRef.current = text
-    } else {
-      // Entirely new text
+    if (!text.startsWith(targetRef.current)) {
       indexRef.current = 0
-      prevTextRef.current = text
+      setDisplayed('')
+    }
+    targetRef.current = text
+
+    const tick = (now) => {
+      if (!tickRef.current) {
+        tickRef.current = now
+      }
+
+      const target = targetRef.current
+      const elapsed = now - tickRef.current
+      const charsToAdd = Math.floor(elapsed / Math.max(12, speed))
+
+      if (indexRef.current < target.length) {
+        if (charsToAdd > 0) {
+          indexRef.current = Math.min(target.length, indexRef.current + charsToAdd)
+          setDisplayed(target.slice(0, indexRef.current))
+          tickRef.current = now
+        }
+        rafRef.current = requestAnimationFrame(tick)
+        return
+      }
+
+      tickRef.current = now
+      rafRef.current = requestAnimationFrame(tick)
     }
 
-    const timer = setInterval(() => {
-      if (indexRef.current < text.length) {
-        const remaining = text.length - indexRef.current
-        const step = remaining > 36 ? 3 : remaining > 18 ? 2 : 1
-        indexRef.current = Math.min(text.length, indexRef.current + step)
-        setDisplayed(text.slice(0, indexRef.current))
-      } else {
-        clearInterval(timer)
-      }
-    }, speed)
+    cancelAnimationFrame(rafRef.current)
+    rafRef.current = requestAnimationFrame(tick)
 
-    return () => clearInterval(timer)
+    return () => {
+      cancelAnimationFrame(rafRef.current)
+    }
   }, [text, speed])
 
   return { displayed, done: displayed.length >= text.length }

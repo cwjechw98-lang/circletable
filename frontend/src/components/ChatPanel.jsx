@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { getRoleLabel } from '../constants/roles.js'
 import { getSpecialtyLabel } from '../constants/specialties.js'
 
-export default function ChatPanel({ messages }) {
+export default function ChatPanel({ messages, pinnedMessages = [], onTogglePin }) {
   const endRef = useRef(null)
   const [autoScroll, setAutoScroll] = useState(true)
 
@@ -21,13 +21,30 @@ export default function ChatPanel({ messages }) {
           className={`chat-scroll-toggle${autoScroll ? ' is-active' : ''}`}
           onClick={() => setAutoScroll((value) => !value)}
           aria-pressed={autoScroll}
-          title="Если выключить, новые сообщения не будут уводить чат вниз во время чтения."
+          data-hint="Если выключить, новые сообщения не будут уводить чат вниз во время чтения."
         >
           {autoScroll ? 'Автопрокрутка: вкл' : 'Автопрокрутка: выкл'}
         </button>
       </div>
 
       <div className="chat-messages">
+        {pinnedMessages.length > 0 && (
+          <div className="chat-pins">
+            <div className="chat-pins-title">Зацепки</div>
+            {pinnedMessages.slice(-4).map((msg, index) => (
+              <button
+                key={msg.id || `pin-${index}`}
+                type="button"
+                className="chat-pin-chip"
+                onClick={() => onTogglePin?.(msg.id)}
+                data-hint="Снять закрепление с сильной мысли."
+              >
+                📌 {(msg.name || msg.agent_name || 'Участник')}: {msg.content}
+              </button>
+            ))}
+          </div>
+        )}
+
         {messages.length === 0 && (
           <div className="empty-state">
             {'>'} Сообщения появятся после запуска беседы.<br />
@@ -86,6 +103,16 @@ export default function ChatPanel({ messages }) {
                 </span>
                 {msg.round && (
                   <span className="chat-msg-round">Раунд {msg.round}</span>
+                )}
+                {onTogglePin && (
+                  <button
+                    type="button"
+                    className={`chat-pin-toggle${msg.pinned ? ' is-pinned' : ''}`}
+                    onClick={() => onTogglePin(msg.id)}
+                    data-hint={msg.pinned ? 'Снять закрепление с этой мысли.' : 'Закрепить сильную мысль как зацепку для Хрономанта.'}
+                  >
+                    {msg.pinned ? '📌' : '⊹'}
+                  </button>
                 )}
               </div>
               <div className="chat-msg-body">{msg.content}</div>

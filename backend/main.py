@@ -196,8 +196,14 @@ async def suggest_casting(payload: dict):
         topic=topic,
         count=payload.get("count"),
         providers_payload=providers,
+        mode=payload.get("mode") or "full",
         provider_name=payload.get("provider"),
         model=payload.get("model"),
+        room_summary=payload.get("roomSummary"),
+        session_chronicle=payload.get("sessionChronicle"),
+        latest_round_summary=payload.get("latestRoundSummary"),
+        active_participants=payload.get("activeParticipants"),
+        missing_expert_hint=payload.get("missingExpertHint"),
     )
 
 
@@ -218,6 +224,7 @@ async def create_room(payload: dict):
         observer_mode=payload.get("observerMode") or "suggest",
         observer_provider=payload.get("observerProvider") or observer_provider,
         observer_model=payload.get("observerModel") or observer_model,
+        density_mode=payload.get("densityMode") or "normal",
     )
     repo().set_current_room(room_id)
     snapshot = repo().get_room_snapshot(room_id)
@@ -247,6 +254,7 @@ async def patch_room(room_id: str, payload: dict):
         room_id,
         name=payload.get("name"),
         observer_mode=payload.get("observerMode"),
+        density_mode=payload.get("densityMode"),
         observer_provider=payload.get("observerProvider"),
         observer_model=payload.get("observerModel"),
     )
@@ -275,8 +283,10 @@ async def delete_room(room_id: str):
         "room": current_snapshot["room"] if current_snapshot else None,
         "participants": current_snapshot["participants"] if current_snapshot else {"active": [], "benched": []},
         "inventory": current_snapshot["inventory"] if current_snapshot else repo().list_saved_profiles(),
+        "teamPresets": current_snapshot["teamPresets"] if current_snapshot else repo().list_team_presets(),
         "session": current_snapshot["session"] if current_snapshot else None,
         "messages": current_snapshot["messages"] if current_snapshot else [],
+        "pinnedMessages": current_snapshot["pinnedMessages"] if current_snapshot else [],
         "observerReviews": current_snapshot["observerReviews"] if current_snapshot else [],
     })
     return {"ok": True}
@@ -331,7 +341,66 @@ async def get_room_inventory(room_id: str):
     return {
         "participants": snapshot["participants"],
         "inventory": snapshot["inventory"],
+        "teamPresets": snapshot["teamPresets"],
     }
+
+
+@app.get("/api/team-presets")
+async def list_team_presets():
+    return {"presets": repo().list_team_presets()}
+
+
+@app.post("/api/team-presets")
+async def create_team_preset(payload: dict):
+    room_id = payload.get("roomId") or repo().get_current_room_id()
+    snapshot = repo().get_room_snapshot(room_id) if room_id else None
+    participants = payload.get("participants") or (snapshot["participants"]["active"] if snapshot else [])
+    if not participants:
+        raise HTTPException(status_code=400, detail="Некого сохранять в состав")
+    preset = repo().create_team_preset((payload.get("name") or "Новый состав").strip(), participants)
+    await manager.broadcast({
+        "type": "team_presets_updated",
+        "teamPresets": repo().list_team_presets(),
+    })
+    return preset
+
+
+@app.delete("/api/team-presets/{preset_id}")
+async def delete_team_preset(preset_id: str):
+    repo().delete_team_preset(preset_id)
+    await manager.broadcast({
+        "type": "team_presets_updated",
+        "teamPresets": repo().list_team_presets(),
+    })
+    return {"ok": True}
+
+
+@app.post("/api/team-presets/{preset_id}/apply")
+async def apply_team_preset(preset_id: str, payload: dict):
+    room_id = payload.get("roomId") or repo().get_current_room_id()
+    if not room_id:
+        raise HTTPException(status_code=400, detail="Комната не выбрана")
+    if debate_engine().running and debate_engine().state != "paused":
+        raise HTTPException(status_code=409, detail="Менять состав можно до старта или на паузе")
+    created = repo().apply_team_preset(room_id, preset_id)
+    session = repo().get_current_session(room_id)
+    for participant in created:
+        repo().add_room_event(room_id, session["id"] if session else None, "participant_added", participant)
+    snapshot = repo().get_room_snapshot(room_id)
+    await manager.broadcast({
+        "type": "participant_roster_changed",
+        "action": "состав применён",
+        "participant": None,
+        "participants": snapshot["participants"],
+        "inventory": snapshot["inventory"],
+    })
+    await manager.broadcast({
+        "type": "room_loaded",
+        "rooms": repo().list_rooms(),
+        "currentRoomId": room_id,
+        **snapshot,
+    })
+    return snapshot
 
 
 @app.get("/api/rooms/{room_id}/sessions")
@@ -380,6 +449,24 @@ async def continue_session(session_id: str):
     }
 
 
+@app.post("/api/sessions/{session_id}/fork")
+async def fork_session(session_id: str):
+    session = repo().get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    new_session = repo().create_session_from_final(session_id)
+    if not new_session:
+        raise HTTPException(status_code=400, detail="Не удалось создать продолжение")
+    snapshot = repo().get_session_snapshot(new_session["id"], make_current=True)
+    await manager.broadcast({
+        "type": "room_loaded",
+        "rooms": repo().list_rooms(),
+        "currentRoomId": snapshot["room"]["id"],
+        **snapshot,
+    })
+    return snapshot
+
+
 @app.patch("/api/sessions/{session_id}")
 async def patch_session(session_id: str, payload: dict):
     if not repo().get_session(session_id):
@@ -412,8 +499,10 @@ async def delete_session(session_id: str):
         "room": current_snapshot["room"] if current_snapshot else None,
         "participants": current_snapshot["participants"] if current_snapshot else {"active": [], "benched": []},
         "inventory": current_snapshot["inventory"] if current_snapshot else repo().list_saved_profiles(),
+        "teamPresets": current_snapshot["teamPresets"] if current_snapshot else repo().list_team_presets(),
         "session": current_snapshot["session"] if current_snapshot else None,
         "messages": current_snapshot["messages"] if current_snapshot else [],
+        "pinnedMessages": current_snapshot["pinnedMessages"] if current_snapshot else [],
         "observerReviews": current_snapshot["observerReviews"] if current_snapshot else [],
     })
     return {"ok": True, "roomId": room_id}
@@ -428,6 +517,24 @@ async def export_session(session_id: str):
         "Content-Disposition": f'attachment; filename="circletable-{session_id}.md"',
     }
     return PlainTextResponse(content, media_type="text/markdown; charset=utf-8", headers=headers)
+
+
+@app.post("/api/messages/{message_id}/pin")
+async def toggle_message_pin(message_id: str, payload: dict):
+    session_id = payload.get("sessionId")
+    room_id = payload.get("roomId")
+    if not session_id or not room_id:
+        raise HTTPException(status_code=400, detail="Не хватает roomId или sessionId")
+    result = repo().toggle_message_pin(room_id, session_id, message_id)
+    snapshot = repo().get_session_snapshot(session_id)
+    await manager.broadcast({
+        "type": "message_pin_toggled",
+        "messageId": result["messageId"],
+        "pinned": result["pinned"],
+        "pinnedMessages": result["pinnedMessages"],
+        "messages": snapshot["messages"] if snapshot else [],
+    })
+    return result
 
 
 @app.websocket("/ws")

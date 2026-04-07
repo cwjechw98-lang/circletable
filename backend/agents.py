@@ -312,8 +312,10 @@ class Agent:
         session_chronicle = ctx.get("session_chronicle", "")
         wrap_signal = ctx.get("wrap_signal", False)
         final_signal = ctx.get("final_signal", False)
+        density_mode = ctx.get("density_mode", "normal")
         round_number = ctx.get("round_number")
         participants = ctx.get("active_participants", [])
+        pinned_highlights = ctx.get("pinned_highlights", [])
         history = ctx.get("history", [])
 
         context_chunks: list[str] = [f'Тема обсуждения: "{topic}"']
@@ -329,8 +331,18 @@ class Agent:
                 for item in participants
             )
             context_chunks.append(f"Текущий состав стола: {roster}")
+        if pinned_highlights:
+            highlight_lines = [
+                f"- {item.get('name') or item.get('agent_name') or 'Участник'}: {item.get('content', '')}"
+                for item in pinned_highlights[:4]
+            ]
+            context_chunks.append("Сильные зацепки, которые пользователь закрепил:\n" + "\n".join(highlight_lines))
         if round_number:
             context_chunks.append(f"Сейчас идёт раунд {round_number}.")
+        if density_mode == "calm":
+            context_chunks.append("Темп стола спокойный: отвечай размеренно, но всё ещё кратко и по делу.")
+        elif density_mode == "stage":
+            context_chunks.append("Темп стола сценический: отвечай собранно, чуть ярче и короче обычного.")
         if final_signal:
             context_chunks.append(
                 "Это финальный раунд. Не открывай новые ветки. Подводи итог и помогай группе завершить обсуждение."

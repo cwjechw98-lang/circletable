@@ -31,6 +31,8 @@ POSITIVE_WORDS = [
 
 HUMOR_WORDS = ["смеш", "шут", "ирон", "ха", "мем"]
 RISK_WORDS = ["риск", "опас", "ошиб", "но", "однако", "огранич"]
+DECISION_WORDS = ["решение", "итог", "выбор", "фиксир", "резюм", "план", "договор"]
+AGREEMENT_WORDS = ["соглас", "сход", "один приоритет", "общий вывод", "берём", "делаем"]
 
 
 class Chronomancer:
@@ -127,6 +129,13 @@ class Chronomancer:
             "tableComment": "string",
             "recommendation": "continue|suggest_final|final_round|complete",
             "suggestedRoundsLeft": "number|null",
+            "finalReason": "string",
+            "missingExpertHint": "string",
+            "progress": {
+                "novelty": "number",
+                "focus": "number",
+                "convergence": "number",
+            },
             "participantComments": {"profile_id": "string"},
             "statsDelta": {
                 "profile_id": {
@@ -227,6 +236,9 @@ class Chronomancer:
             "tableComment": review.get("tableComment", ""),
             "recommendation": review.get("recommendation", "continue"),
             "suggestedRoundsLeft": review.get("suggestedRoundsLeft"),
+            "finalReason": review.get("finalReason", ""),
+            "missingExpertHint": review.get("missingExpertHint", ""),
+            "progress": self._normalize_progress(review.get("progress")),
             "participantComments": normalized_comments,
             "statsDelta": normalized_delta,
             "achievements": achievements,
@@ -297,26 +309,47 @@ class Chronomancer:
 
         event_note = self._compose_event_note(room_events)
         round_summary = " | ".join(summaries[:4]) or f"Раунд {round_number} прошёл без заметных реплик."
+        progress = self._score_progress(topic=topic, chronicle=chronicle, round_messages=round_messages, round_summary=round_summary)
+        missing_expert_hint = self._suggest_missing_expert(topic=topic, participants=participants, round_messages=round_messages)
 
         chronicle_parts = [part for part in [chronicle.strip(), f"Раунд {round_number}: {round_summary}"] if part]
         chronicle_after = "\n".join(chronicle_parts[-6:])
 
         recommendation = "continue"
         rounds_left = None
+        final_reason = ""
         if final_round_planned:
             recommendation = "complete"
             rounds_left = 0
+            final_reason = "Финальный раунд уже был назначен, поэтому стол фиксирует итог."
         elif observer_mode == "auto" and wrap_requested and extension_count >= 2:
             recommendation = "final_round"
             rounds_left = 1
+            final_reason = "Стол уже несколько раз подталкивали к выводу, пора завершать следующий круг итогами."
         elif wrap_requested:
             recommendation = "suggest_final"
             rounds_left = 1
+            final_reason = "Пользователь уже попросил закругляться, поэтому следующий шаг — мягкая финализация."
+        elif observer_mode != "manual" and round_number >= 8 and (
+            progress["novelty"] <= 36 or progress["convergence"] >= 64
+        ):
+            recommendation = "final_round" if observer_mode == "auto" else "suggest_final"
+            rounds_left = 1
+            final_reason = "Раундов уже много, новизна упала, а стол близок к повторению тезисов."
+        elif observer_mode != "manual" and round_number >= 6 and progress["novelty"] <= 34:
+            recommendation = "suggest_final"
+            rounds_left = 1
+            final_reason = "Новых ходов почти не прибавляется, разговор начинает ходить по кругу."
+        elif observer_mode != "manual" and round_number >= 5 and progress["convergence"] >= 70:
+            recommendation = "suggest_final"
+            rounds_left = 1
+            final_reason = "Стол уже близок к общему выводу, можно аккуратно подводить итог."
         elif observer_mode != "manual" and round_number >= 4:
             recommendation = "suggest_final"
             rounds_left = 1
+            final_reason = "Обсуждение уже разогрелось: Хрономант начинает присматриваться к моменту финала."
 
-        table_comment = event_note or "Хрономант видит устойчивый темп обсуждения."
+        table_comment = event_note or self._compose_progress_note(progress, final_reason, missing_expert_hint)
 
         return {
             "chronicleBefore": chronicle,
@@ -325,6 +358,9 @@ class Chronomancer:
             "tableComment": table_comment,
             "recommendation": recommendation,
             "suggestedRoundsLeft": rounds_left,
+            "finalReason": final_reason,
+            "missingExpertHint": missing_expert_hint,
+            "progress": progress,
             "participantComments": comments,
             "statsDelta": stats_delta,
             "achievements": achievements[: min(len(achievements), 5)],
@@ -367,3 +403,79 @@ class Chronomancer:
             elif event["type"] == "participant_restored":
                 recent.append(f"возвращение {payload.get('name', 'участника')} снова изменило тон разговора")
         return ". ".join(recent[:2]).strip().capitalize()
+
+    def _normalize_progress(self, progress: dict | None) -> dict:
+        progress = progress or {}
+        return {
+            "novelty": max(0, min(100, int(progress.get("novelty", 50)))),
+            "focus": max(0, min(100, int(progress.get("focus", 50)))),
+            "convergence": max(0, min(100, int(progress.get("convergence", 50)))),
+        }
+
+    def _extract_keywords(self, text: str) -> set[str]:
+        return {
+            word
+            for word in re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9]{4,}", (text or "").lower())
+            if len(word) >= 4
+        }
+
+    def _score_progress(self, *, topic: str, chronicle: str, round_messages: list[dict], round_summary: str) -> dict:
+        topic_keywords = self._extract_keywords(topic)
+        chronicle_keywords = self._extract_keywords(chronicle)
+        round_text = " ".join((message.get("content") or "") for message in round_messages)
+        round_keywords = self._extract_keywords(round_text)
+
+        new_keywords = round_keywords - chronicle_keywords
+        overlap_ratio = 0
+        if round_keywords:
+            overlap_ratio = len(round_keywords & chronicle_keywords) / max(len(round_keywords), 1)
+
+        topic_hits = len(round_keywords & topic_keywords)
+        novelty = 34 + min(46, len(new_keywords) * 4) - int(overlap_ratio * 28)
+        focus = 38 + min(34, topic_hits * 8)
+        convergence = 22
+
+        lowered = round_text.lower()
+        convergence += sum(8 for word in DECISION_WORDS if word in lowered)
+        convergence += sum(6 for word in AGREEMENT_WORDS if word in lowered)
+        if "итог" in round_summary.lower() or "план" in round_summary.lower():
+            convergence += 10
+        if overlap_ratio > 0.62:
+            novelty -= 12
+        if topic_hits == 0:
+            focus -= 14
+
+        return {
+            "novelty": max(0, min(100, novelty)),
+            "focus": max(0, min(100, focus)),
+            "convergence": max(0, min(100, convergence)),
+        }
+
+    def _compose_progress_note(self, progress: dict, final_reason: str, missing_expert_hint: str) -> str:
+        parts = [
+            f"Новизна: {progress['novelty']}%",
+            f"Фокус: {progress['focus']}%",
+            f"Сходимость: {progress['convergence']}%",
+        ]
+        if final_reason:
+            parts.append(final_reason)
+        if missing_expert_hint:
+            parts.append(f"Не хватает голоса: {missing_expert_hint}")
+        return " · ".join(parts)
+
+    def _suggest_missing_expert(self, *, topic: str, participants: list[dict], round_messages: list[dict]) -> str:
+        topic_text = f"{topic}\n" + "\n".join((message.get("content") or "") for message in round_messages[-4:])
+        topic_text = topic_text.lower()
+        specialties = {item.get("specialty") for item in participants}
+
+        if any(word in topic_text for word in ["бюджет", "деньг", "окуп", "валют", "выруч", "цена"]) and "finance-strategy" not in specialties:
+            return "Финансист или экономист, чтобы считать деньги и приоритеты."
+        if any(word in topic_text for word in ["риск", "договор", "закон", "регул", "легал"]) and "lawyer" not in specialties and "compliance-risk" not in specialties:
+            return "Юрист или комплаенс-специалист, чтобы закрыть правовые риски."
+        if any(word in topic_text for word in ["продаж", "клиент", "воронк", "лид", "чек"]) and "sales-funnels" not in specialties:
+            return "Практик по продажам и воронкам, чтобы перевести идею в сделки."
+        if any(word in topic_text for word in ["интерфейс", "сайт", "продукт", "опыт", "ux"]) and "ux-research" not in specialties and "frontend-engineer" not in specialties:
+            return "UX-исследователь или фронтендер, чтобы приземлить опыт пользователя."
+        if "ops-manager" not in specialties and len(participants) >= 4:
+            return "Операционный менеджер, чтобы превратить идеи в пошаговый план."
+        return ""

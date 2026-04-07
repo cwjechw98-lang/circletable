@@ -1,10 +1,11 @@
-import React, { useCallback, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import RoundTable from './components/RoundTable.jsx'
 import ChatPanel from './components/ChatPanel.jsx'
 import ControlPanel from './components/ControlPanel.jsx'
 import RoundAnnounce from './components/RoundAnnounce.jsx'
 import RoomsDrawer from './components/RoomsDrawer.jsx'
 import InventoryDrawer from './components/InventoryDrawer.jsx'
+import TimedHintLayer from './components/TimedHintLayer.jsx'
 import { useWebSocket } from './hooks/useWebSocket.js'
 
 async function apiJson(path, options = {}) {
@@ -31,6 +32,99 @@ function normalizeMode(mode) {
   return 'С подсказками'
 }
 
+const THEME_OPTIONS = [
+  { value: 'classic', label: 'Аркада' },
+  { value: 'matrix', label: 'Матрица' },
+  { value: 'ember', label: 'Уголь' },
+  { value: 'slate', label: 'Сталь' },
+  { value: 'violet', label: 'Ночь' },
+  { value: 'abyss', label: 'Бездна' },
+  { value: 'aurora', label: 'Аврора' },
+  { value: 'porcelain', label: 'Фарфор' },
+  { value: 'sand', label: 'Песок' },
+]
+
+function readTheme() {
+  try {
+    return localStorage.getItem('circletable-theme') || 'classic'
+  } catch {
+    return 'classic'
+  }
+}
+
+const UI_FONT_SCALE_KEY = 'circletable-ui-font-scale-v1'
+const UI_FONT_SCALE_MIN = 0.9
+const UI_FONT_SCALE_MAX = 1.6
+const CHAT_PANEL_WIDTH_KEY = 'circletable-chat-panel-width-v1'
+const CHAT_PANEL_MIN = 320
+const CHAT_PANEL_MAX = 860
+const SLOW_THINKING_MS = 10000
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value))
+}
+
+function clampChatPanelWidth(value) {
+  const viewportWidth = typeof window === 'undefined' ? 1600 : window.innerWidth
+  const maxAllowed = clamp(Math.round(viewportWidth * 0.48), 360, CHAT_PANEL_MAX)
+  return clamp(Number(value) || 0, CHAT_PANEL_MIN, maxAllowed)
+}
+
+function readUiFontScale() {
+  try {
+    const raw = Number(localStorage.getItem(UI_FONT_SCALE_KEY) || '1')
+    return Number.isFinite(raw) ? clamp(raw, UI_FONT_SCALE_MIN, UI_FONT_SCALE_MAX) : 1
+  } catch {
+    return 1
+  }
+}
+
+function readChatPanelWidth() {
+  try {
+    const raw = Number(localStorage.getItem(CHAT_PANEL_WIDTH_KEY) || '400')
+    return Number.isFinite(raw) ? clampChatPanelWidth(raw) : 400
+  } catch {
+    return 400
+  }
+}
+
+function buildAgentModelSignature(agent) {
+  return `${agent?.provider || 'unknown'}::${agent?.model || 'unknown'}`
+}
+
+function buildAgentModelLabel(agent) {
+  return `${agent?.provider || '—'}/${agent?.model || '—'}`
+}
+
+function createResponseMetricEntry(label = '') {
+  return {
+    label,
+    avgSeconds: 0,
+    sampleCount: 0,
+    slowCount: 0,
+    latestSeconds: 0,
+  }
+}
+
+function buildModelChangeText(previousEntry, previousLabel, nextEntry, nextLabel) {
+  if (!previousLabel || previousLabel === nextLabel) {
+    return ''
+  }
+
+  if (previousEntry?.sampleCount >= 2 && nextEntry?.sampleCount >= 2) {
+    const diff = nextEntry.avgSeconds - previousEntry.avgSeconds
+    if (diff <= -1.2) {
+      return `После смены модели отвечает быстрее на ${Math.abs(diff).toFixed(1)}с.`
+    }
+    if (diff >= 1.2) {
+      return `После смены модели отвечает медленнее на ${diff.toFixed(1)}с.`
+    }
+    return 'После смены модели темп почти не изменился.'
+  }
+
+  return `Смена модели: ${previousLabel} → ${nextLabel}. Хрономант копит новый темп.`
+}
+
 export default function App() {
   const [connected, setConnected] = useState(false)
   const [shuttingDown, setShuttingDown] = useState(false)
@@ -40,7 +134,9 @@ export default function App() {
   const [room, setRoom] = useState(null)
   const [participants, setParticipants] = useState({ active: [], benched: [] })
   const [inventory, setInventory] = useState([])
+  const [teamPresets, setTeamPresets] = useState([])
   const [messages, setMessages] = useState([])
+  const [pinnedMessages, setPinnedMessages] = useState([])
   const [observerReviews, setObserverReviews] = useState([])
   const [session, setSession] = useState(null)
   const [sessionState, setSessionState] = useState('idle')
@@ -50,6 +146,13 @@ export default function App() {
   const [inventoryOpen, setInventoryOpen] = useState(false)
   const [observerBusy, setObserverBusy] = useState(false)
   const [observerSuggestion, setObserverSuggestion] = useState(null)
+  const [theme, setTheme] = useState(readTheme)
+  const [uiFontScale, setUiFontScale] = useState(readUiFontScale)
+  const [fontPanelOpen, setFontPanelOpen] = useState(false)
+  const [chatPanelWidth, setChatPanelWidth] = useState(readChatPanelWidth)
+  const [chatResizeActive, setChatResizeActive] = useState(false)
+  const [responseMetrics, setResponseMetrics] = useState({})
+  const [slowThinkingSet, setSlowThinkingSet] = useState(new Set())
 
   const [thinkingSet, setThinkingSet] = useState(new Set())
   const [speakingSet, setSpeakingSet] = useState(new Set())
@@ -58,6 +161,109 @@ export default function App() {
   const [announce, setAnnounce] = useState(null)
 
   const processedEventsRef = useRef(new Set())
+  const chatResizeRef = useRef(null)
+  const responseTimingRef = useRef({})
+  const activeParticipantsRef = useRef([])
+
+  const clearResponseWatch = useCallback((agentId, clearVisual = true) => {
+    const current = responseTimingRef.current[agentId]
+    if (current?.slowTimer) {
+      window.clearTimeout(current.slowTimer)
+    }
+    delete responseTimingRef.current[agentId]
+    if (clearVisual) {
+      setSlowThinkingSet((prev) => {
+        if (!prev.has(agentId)) return prev
+        const next = new Set(prev)
+        next.delete(agentId)
+        return next
+      })
+    }
+  }, [])
+
+  const startResponseWatch = useCallback((agentId) => {
+    clearResponseWatch(agentId, false)
+    const agent = activeParticipantsRef.current.find((item) => item.id === agentId)
+    const startedAt = Date.now()
+    const slowTimer = window.setTimeout(() => {
+      setSlowThinkingSet((prev) => {
+        if (prev.has(agentId)) return prev
+        return new Set([...prev, agentId])
+      })
+    }, SLOW_THINKING_MS)
+
+    responseTimingRef.current[agentId] = {
+      startedAt,
+      recorded: false,
+      slowTimer,
+      signature: buildAgentModelSignature(agent),
+      label: buildAgentModelLabel(agent),
+    }
+  }, [clearResponseWatch])
+
+  const finishResponseWatch = useCallback((agentId) => {
+    const current = responseTimingRef.current[agentId]
+    if (!current || current.recorded) {
+      clearResponseWatch(agentId)
+      return
+    }
+
+    current.recorded = true
+    const elapsedSeconds = Math.max(0.1, (Date.now() - current.startedAt) / 1000)
+
+    setResponseMetrics((prev) => {
+      const signature = current.signature || 'unknown::unknown'
+      const label = current.label || '—/—'
+      const existing = prev[agentId] || {
+        currentSignature: signature,
+        currentLabel: label,
+        currentModelMetric: createResponseMetricEntry(label),
+        models: {},
+        trendText: '',
+      }
+      const existingEntry = existing.models[signature] || createResponseMetricEntry(label)
+      const sampleCount = existingEntry.sampleCount + 1
+      const avgSeconds = ((existingEntry.avgSeconds * existingEntry.sampleCount) + elapsedSeconds) / sampleCount
+      const updatedEntry = {
+        ...existingEntry,
+        label,
+        avgSeconds,
+        sampleCount,
+        slowCount: existingEntry.slowCount + (elapsedSeconds >= SLOW_THINKING_MS / 1000 ? 1 : 0),
+        latestSeconds: elapsedSeconds,
+      }
+      const currentSignature = existing.currentSignature || signature
+
+      return {
+        ...prev,
+        [agentId]: {
+          ...existing,
+          currentSignature,
+          currentLabel: currentSignature === signature ? label : existing.currentLabel,
+          currentModelMetric: currentSignature === signature
+            ? updatedEntry
+            : existing.currentModelMetric || updatedEntry,
+          models: {
+            ...existing.models,
+            [signature]: updatedEntry,
+          },
+        },
+      }
+    })
+
+    clearResponseWatch(agentId)
+  }, [clearResponseWatch])
+
+  const resetResponseMetrics = useCallback(() => {
+    Object.values(responseTimingRef.current).forEach((entry) => {
+      if (entry?.slowTimer) {
+        window.clearTimeout(entry.slowTimer)
+      }
+    })
+    responseTimingRef.current = {}
+    setResponseMetrics({})
+    setSlowThinkingSet(new Set())
+  }, [])
 
   const applyRoomSnapshot = useCallback((payload) => {
     if (payload.rooms) {
@@ -75,6 +281,9 @@ export default function App() {
     if (payload.inventory) {
       setInventory(payload.inventory)
     }
+    if (payload.teamPresets) {
+      setTeamPresets(payload.teamPresets)
+    }
     if (payload.session !== undefined) {
       setSession(payload.session)
       if (payload.session?.status) {
@@ -85,6 +294,9 @@ export default function App() {
     }
     if (payload.messages) {
       setMessages(payload.messages)
+    }
+    if (payload.pinnedMessages) {
+      setPinnedMessages(payload.pinnedMessages)
     }
     if (payload.observerReviews) {
       setObserverReviews(payload.observerReviews)
@@ -122,6 +334,7 @@ export default function App() {
         break
 
       case 'init':
+        resetResponseMetrics()
         setRefreshingProviders(false)
         setProviders(data.providers || {})
         setRooms(data.rooms || [])
@@ -141,6 +354,7 @@ export default function App() {
         break
 
       case 'room_loaded':
+        resetResponseMetrics()
         applyRoomSnapshot(data)
         break
 
@@ -176,6 +390,7 @@ export default function App() {
         break
 
       case 'agent_thinking':
+        startResponseWatch(data.agent_id)
         setThinkingSet((prev) => new Set([...prev, data.agent_id]))
         setSpeakingSet((prev) => {
           const next = new Set(prev)
@@ -187,6 +402,7 @@ export default function App() {
         break
 
       case 'agent_token':
+        finishResponseWatch(data.agent_id)
         setSpeakingSet((prev) => new Set([...prev, data.agent_id]))
         setThinkingSet((prev) => {
           const next = new Set(prev)
@@ -204,6 +420,7 @@ export default function App() {
       case 'user_question':
       case 'observer_note':
         if (data.agent_id) {
+          finishResponseWatch(data.agent_id)
           setSpeakingSet((prev) => {
             const next = new Set(prev)
             next.delete(data.agent_id)
@@ -250,12 +467,27 @@ export default function App() {
         }
         break
 
+      case 'team_presets_updated':
+        if (data.teamPresets) {
+          setTeamPresets(data.teamPresets)
+        }
+        break
+
       case 'participant_roster_changed':
         if (data.participants) {
           setParticipants(data.participants)
         }
         if (data.inventory) {
           setInventory(data.inventory)
+        }
+        break
+
+      case 'message_pin_toggled':
+        if (data.messages) {
+          setMessages(data.messages)
+        }
+        if (data.pinnedMessages) {
+          setPinnedMessages(data.pinnedMessages)
         }
         break
 
@@ -275,6 +507,7 @@ export default function App() {
         break
 
       case 'reset':
+        resetResponseMetrics()
         setSession(null)
         setSessionState('idle')
         setMessages([])
@@ -306,7 +539,7 @@ export default function App() {
       default:
         break
     }
-  }, [applyRoomSnapshot])
+  }, [applyRoomSnapshot, finishResponseWatch, resetResponseMetrics, startResponseWatch])
 
   const { send } = useWebSocket(handleWsMessage)
 
@@ -314,6 +547,78 @@ export default function App() {
   const benchedParticipants = participants.benched || []
   const latestObserverReview = observerReviews[0] || null
   const headerMode = normalizeMode(room?.observerMode)
+
+  useEffect(() => {
+    activeParticipantsRef.current = activeParticipants
+  }, [activeParticipants])
+
+  useEffect(() => {
+    if (activeParticipants.length === 0) {
+      return
+    }
+
+    setResponseMetrics((current) => {
+      let changed = false
+      const next = { ...current }
+
+      activeParticipants.forEach((agent) => {
+        const signature = buildAgentModelSignature(agent)
+        const label = buildAgentModelLabel(agent)
+        const existing = current[agent.id]
+
+        if (!existing) {
+          changed = true
+          const emptyMetric = createResponseMetricEntry(label)
+          next[agent.id] = {
+            currentSignature: signature,
+            currentLabel: label,
+            currentModelMetric: emptyMetric,
+            models: {
+              [signature]: emptyMetric,
+            },
+            trendText: '',
+          }
+          return
+        }
+
+        const nextEntry = existing.models[signature] || createResponseMetricEntry(label)
+        const normalizedEntry = { ...nextEntry, label }
+
+        if (
+          existing.currentSignature !== signature
+          || existing.currentLabel !== label
+          || !existing.currentModelMetric
+          || existing.currentModelMetric.label !== normalizedEntry.label
+        ) {
+          changed = true
+          const previousEntry = existing.models[existing.currentSignature]
+          next[agent.id] = {
+            ...existing,
+            currentSignature: signature,
+            currentLabel: label,
+            currentModelMetric: normalizedEntry,
+            models: {
+              ...existing.models,
+              [signature]: normalizedEntry,
+            },
+            trendText: buildModelChangeText(
+              previousEntry,
+              existing.currentLabel,
+              normalizedEntry,
+              label,
+            ),
+          }
+        }
+      })
+
+      return changed ? next : current
+    })
+  }, [activeParticipants])
+
+  function handleThemeChange(nextTheme) {
+    setTheme(nextTheme)
+    localStorage.setItem('circletable-theme', nextTheme)
+  }
 
   async function handleCreateRoom(name) {
     try {
@@ -428,8 +733,141 @@ export default function App() {
     })
   }
 
+  function handleFontScaleChange(nextScale) {
+    const clamped = clamp(Number(nextScale), UI_FONT_SCALE_MIN, UI_FONT_SCALE_MAX)
+    setUiFontScale(clamped)
+    localStorage.setItem(UI_FONT_SCALE_KEY, String(clamped))
+  }
+
+  function handleFontScaleReset() {
+    setUiFontScale(1)
+    localStorage.setItem(UI_FONT_SCALE_KEY, '1')
+  }
+
+  const handleChatResizeMove = useCallback((event) => {
+    const drag = chatResizeRef.current
+    if (!drag) return
+    const delta = drag.startX - event.clientX
+    setChatPanelWidth(clampChatPanelWidth(drag.startWidth + delta))
+  }, [])
+
+  const stopChatResize = useCallback(() => {
+    if (!chatResizeRef.current) return
+    chatResizeRef.current = null
+    setChatResizeActive(false)
+    document.body.classList.remove('is-resizing-chat')
+  }, [])
+
+  function startChatResize(event) {
+    if (event.button !== 0) return
+    chatResizeRef.current = {
+      startX: event.clientX,
+      startWidth: chatPanelWidth,
+    }
+    setChatResizeActive(true)
+    document.body.classList.add('is-resizing-chat')
+    event.preventDefault()
+  }
+
+  function resetChatPanelWidth() {
+    const next = clampChatPanelWidth(400)
+    setChatPanelWidth(next)
+    localStorage.setItem(CHAT_PANEL_WIDTH_KEY, String(next))
+  }
+
+  async function handleCreateTeamPreset(name) {
+    try {
+      await apiJson('/api/team-presets', {
+        method: 'POST',
+        body: JSON.stringify({
+          roomId: currentRoomId,
+          name,
+          participants: activeParticipants,
+        }),
+      })
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  async function handleDeleteTeamPreset(presetId) {
+    try {
+      await apiJson(`/api/team-presets/${presetId}`, {
+        method: 'DELETE',
+      })
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  async function handleApplyTeamPreset(presetId) {
+    try {
+      const snapshot = await apiJson(`/api/team-presets/${presetId}/apply`, {
+        method: 'POST',
+        body: JSON.stringify({ roomId: currentRoomId }),
+      })
+      applyRoomSnapshot(snapshot)
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  async function handleToggleMessagePin(messageId) {
+    if (!session?.id || !currentRoomId) return
+    try {
+      await apiJson(`/api/messages/${messageId}/pin`, {
+        method: 'POST',
+        body: JSON.stringify({
+          roomId: currentRoomId,
+          sessionId: session.id,
+        }),
+      })
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  useEffect(() => {
+    localStorage.setItem(CHAT_PANEL_WIDTH_KEY, String(chatPanelWidth))
+  }, [chatPanelWidth])
+
+  useEffect(() => () => {
+    Object.values(responseTimingRef.current).forEach((entry) => {
+      if (entry?.slowTimer) {
+        window.clearTimeout(entry.slowTimer)
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    function handleViewportResize() {
+      setChatPanelWidth((current) => clampChatPanelWidth(current))
+    }
+
+    window.addEventListener('resize', handleViewportResize)
+    window.addEventListener('pointermove', handleChatResizeMove)
+    window.addEventListener('pointerup', stopChatResize)
+    window.addEventListener('pointercancel', stopChatResize)
+
+    return () => {
+      window.removeEventListener('resize', handleViewportResize)
+      window.removeEventListener('pointermove', handleChatResizeMove)
+      window.removeEventListener('pointerup', stopChatResize)
+      window.removeEventListener('pointercancel', stopChatResize)
+      document.body.classList.remove('is-resizing-chat')
+    }
+  }, [handleChatResizeMove, stopChatResize])
+
   return (
-    <div className="app">
+    <div
+      className="app"
+      data-theme={theme}
+      style={{
+        '--ui-font-scale': uiFontScale,
+        '--chat-panel-width': `${chatPanelWidth}px`,
+      }}
+    >
+      <TimedHintLayer />
       {announce && (
         <RoundAnnounce
           round={announce.round}
@@ -456,6 +894,14 @@ export default function App() {
         onCreateRoom={handleCreateRoom}
         onRenameRoom={handleRenameRoom}
         onDeleteRoom={handleDeleteRoom}
+        onForkSession={async (sessionId) => {
+          try {
+            const snapshot = await apiJson(`/api/sessions/${sessionId}/fork`, { method: 'POST' })
+            applyRoomSnapshot(snapshot)
+          } catch (error) {
+            console.error(error)
+          }
+        }}
       />
 
       <InventoryDrawer
@@ -479,6 +925,14 @@ export default function App() {
           </div>
         </div>
         <div className="header-status">
+          <label className="theme-switcher" data-hint="Переключить цветовую тему интерфейса.">
+            <span>Палитра</span>
+            <select value={theme} onChange={(event) => handleThemeChange(event.target.value)}>
+              {THEME_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
           <div className="header-status-indicator">
             <div className={`status-led${connected ? ' on' : ''}`} />
             {connected ? 'На связи' : 'Подключение...'}
@@ -497,10 +951,20 @@ export default function App() {
         <RoundTable
           agents={activeParticipants}
           topic={session?.topic || topic}
+          densityMode={room?.densityMode || 'normal'}
           thinkingSet={thinkingSet}
           speakingSet={speakingSet}
           streamTexts={streamTexts}
           emotions={emotions}
+          responseMetrics={responseMetrics}
+          slowThinkingSet={slowThinkingSet}
+          uiFontScale={uiFontScale}
+          fontPanelOpen={fontPanelOpen}
+          onToggleFontPanel={() => setFontPanelOpen((value) => !value)}
+          onFontScaleChange={handleFontScaleChange}
+          onFontScaleReset={handleFontScaleReset}
+          fontScaleMin={UI_FONT_SCALE_MIN}
+          fontScaleMax={UI_FONT_SCALE_MAX}
         />
 
         <ControlPanel
@@ -515,6 +979,7 @@ export default function App() {
           latestObserverSuggestion={observerSuggestion}
           latestObserverReview={latestObserverReview}
           observerBusy={observerBusy}
+          teamPresets={teamPresets}
           onTopicChange={setTopic}
           onStartSession={handleStartSession}
           onPauseSession={() => send({ type: 'pause_session' })}
@@ -532,12 +997,36 @@ export default function App() {
             setRoom((prev) => prev ? { ...prev, observerMode } : prev)
             send({ type: 'observer_mode_changed', roomId: currentRoomId, observerMode })
           }}
+          onDensityModeChange={async (densityMode) => {
+            try {
+              const snapshot = await apiJson(`/api/rooms/${currentRoomId}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ densityMode }),
+              })
+              applyRoomSnapshot(snapshot)
+            } catch (error) {
+              console.error(error)
+            }
+          }}
           onCreateParticipant={handleCreateParticipant}
           onSubmitQuestion={(content) => send({ type: 'submit_user_question', content })}
+          onCreateTeamPreset={handleCreateTeamPreset}
+          onApplyTeamPreset={handleApplyTeamPreset}
+          onDeleteTeamPreset={handleDeleteTeamPreset}
         />
       </div>
 
-      <ChatPanel messages={messages} />
+      <div
+        className={`chat-resizer${chatResizeActive ? ' is-active' : ''}`}
+        onPointerDown={startChatResize}
+        onDoubleClick={resetChatPanelWidth}
+        data-hint="Потяните, чтобы изменить ширину журнала беседы. Двойной клик вернёт стандартный размер."
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Изменить ширину журнала беседы"
+      />
+
+      <ChatPanel messages={messages} pinnedMessages={pinnedMessages} onTogglePin={handleToggleMessagePin} />
     </div>
   )
 }

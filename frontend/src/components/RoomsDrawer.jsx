@@ -22,6 +22,7 @@ export default function RoomsDrawer({
   onCreateRoom,
   onRenameRoom,
   onDeleteRoom,
+  onForkSession,
 }) {
   const [newRoomName, setNewRoomName] = useState('')
   const [expandedRoomId, setExpandedRoomId] = useState(null)
@@ -266,6 +267,7 @@ export default function RoomsDrawer({
                         <div className="room-card-actions">
                           <button className="pixel-btn ghost" onClick={() => openSession(session.id)}>Читать</button>
                           <button className="pixel-btn start" onClick={() => continueSession(session.id)}>Продолжить</button>
+                          <button className="pixel-btn ghost" onClick={() => onForkSession?.(session.id)}>От финала</button>
                           <button className="pixel-btn ghost" onClick={() => renameSession(session)}>Переименовать</button>
                           <button className="pixel-btn ghost" onClick={() => exportSession(session.id)}>Экспорт .md</button>
                           <button className="pixel-btn danger" onClick={() => deleteSession(session)}>Удалить</button>
