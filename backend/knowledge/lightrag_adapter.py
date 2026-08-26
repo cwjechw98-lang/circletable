@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import threading
@@ -239,7 +240,8 @@ def query_profile_graph(graph_id: str, query: str, mode: str = "hybrid", top_k: 
 def get_knowledge_graph(graph_id: str, *, root_dir: Path | None = None) -> dict[str, Any]:
     rag = get_or_create_instance(graph_id, root_dir=root_dir)
     try:
-        graph = rag.get_knowledge_graph(node_label="*", max_depth=3, max_nodes=2000)
+        # В lightrag-hku get_knowledge_graph — корутина: обязательно через run_async.
+        graph = run_async(rag.get_knowledge_graph(node_label="*", max_depth=3, max_nodes=2000))
         if isinstance(graph, dict):
             return graph
     except Exception:
@@ -292,3 +294,39 @@ def get_knowledge_graph(graph_id: str, *, root_dir: Path | None = None) -> dict[
         "node_count": len(nodes),
         "edge_count": len(edges),
     }
+
+
+def get_stored_texts(graph_id: str, *, root_dir: Path | None = None, limit: int = 40) -> list[str]:
+    """Сырые тексты, вставленные в граф (фолбэк, когда сущностей ещё нет).
+
+    Читает kv-хранилища LightRAG с диска: сначала чанки, потом полные документы.
+    """
+    working_dir = _working_dir_for(graph_id, root_dir=root_dir)
+    texts: list[str] = []
+    for filename in ("kv_store_text_chunks.json", "kv_store_full_docs.json"):
+        path = working_dir / filename
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        for value in data.values():
+            content = value.get("content") if isinstance(value, dict) else value
+            if isinstance(content, str) and content.strip():
+                texts.append(content.strip())
+            if len(texts) >= limit:
+                break
+        if texts:
+            break
+    return [text[:400] for text in texts[:limit]]
+
+
+def get_profile_knowledge_graph(graph_id: str) -> dict[str, Any]:
+    return get_knowledge_graph(graph_id, root_dir=PROFILE_GRAPH_ROOT)
+
+
+def get_profile_stored_texts(graph_id: str, *, limit: int = 40) -> list[str]:
+    return get_stored_texts(graph_id, root_dir=PROFILE_GRAPH_ROOT, limit=limit)

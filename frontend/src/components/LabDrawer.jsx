@@ -73,7 +73,7 @@ function LabCard({ dossier, onOpen }) {
   )
 }
 
-function DossierView({ dossier, onBack }) {
+function DossierView({ dossier, memory, confirmForget, forgetting, onBack, onAskForget, onCancelForget, onForget }) {
   const mascot = resolveMascot(dossier)
   const career = dossier.career || {}
   return (
@@ -115,6 +115,77 @@ function DossierView({ dossier, onBack }) {
         <div className="dossier-career-cell"><span>{dossier.reviewMentions || 0}</span>оценок Хрономанта</div>
       </div>
 
+      <div className="dossier-section-title">Память</div>
+      {!memory && <div className="dossier-empty">Загружаем память...</div>}
+      {memory && !memory.hasMemory && (
+        <div className="dossier-empty">
+          Памяти пока нет — она появится после раундов с Хрономантом и будет помогать персонажу в следующих сессиях.
+        </div>
+      )}
+      {memory && memory.hasMemory && (
+        <div className="dossier-memory">
+          <div className="dossier-memory-stats">
+            <span className="dossier-memory-count">Сущностей: {memory.entityCount}</span>
+            <span className="dossier-memory-count">Связей: {memory.factCount}</span>
+            {memory.entityCount === 0 && (memory.entries || []).length > 0 && (
+              <span className="dossier-memory-count">Сырых записей: {memory.entries.length}</span>
+            )}
+            {!confirmForget ? (
+              <button
+                className="pixel-btn danger dossier-forget"
+                onClick={onAskForget}
+                data-hint="Полностью стереть профильный граф памяти: персонаж забудет все прошлые сессии."
+              >
+                🧹 Забыть всё
+              </button>
+            ) : (
+              <span className="dossier-forget-confirm">
+                Стереть всю память?
+                <button className="pixel-btn danger" onClick={onForget} disabled={forgetting}>
+                  {forgetting ? 'Стираем...' : 'Да, забыть'}
+                </button>
+                <button className="pixel-btn ghost" onClick={onCancelForget}>Отмена</button>
+              </span>
+            )}
+          </div>
+          {(memory.entities || []).length > 0 && (
+            <div className="dossier-memory-entities">
+              {memory.entities.slice(0, 24).map((entity) => (
+                <span
+                  key={entity.name}
+                  className="dossier-memory-entity"
+                  title={`${entity.type}${entity.summary ? `: ${entity.summary}` : ''}`}
+                >
+                  {entity.name}
+                </span>
+              ))}
+              {memory.entityCount > 24 && (
+                <span className="dossier-memory-more">+{memory.entityCount - 24}…</span>
+              )}
+            </div>
+          )}
+          {(memory.facts || []).length > 0 && (
+            <ul className="dossier-notes">
+              {memory.facts.slice(0, 6).map((fact, index) => (
+                <li key={`fact-${index}`}>{fact.fact}</li>
+              ))}
+            </ul>
+          )}
+          {memory.entityCount === 0 && (memory.entries || []).length > 0 && (
+            <>
+              <div className="dossier-memory-note-title">
+                Что персонаж запомнил дословно (граф ещё не структурирован):
+              </div>
+              <ul className="dossier-notes">
+                {memory.entries.slice(0, 6).map((entry, index) => (
+                  <li key={`entry-${index}`}>{entry}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="dossier-section-title">Ачивки</div>
       {(dossier.achievements || []).length === 0 ? (
         <div className="dossier-empty">Награды появятся после раундов с Хрономантом.</div>
@@ -150,9 +221,13 @@ export default function LabDrawer({ open, onClose }) {
   const [dossiers, setDossiers] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [detail, setDetail] = useState(null)
+  const [memory, setMemory] = useState(null)
+  const [confirmForget, setConfirmForget] = useState(false)
+  const [forgetting, setForgetting] = useState(false)
   const [loadingList, setLoadingList] = useState(false)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
 
   useEffect(() => {
     if (!open) return
@@ -198,6 +273,54 @@ export default function LabDrawer({ open, onClose }) {
     }
   }, [open, selectedId])
 
+  useEffect(() => {
+    if (!open || !selectedId) {
+      setMemory(null)
+      setConfirmForget(false)
+      return
+    }
+    let cancelled = false
+    fetch(`/api/lab/profiles/${selectedId}/memory`)
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error('Не удалось загрузить память'))))
+      .then((data) => {
+        if (!cancelled) setMemory(data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [open, selectedId])
+
+  async function forgetMemory() {
+    if (!selectedId) return
+    setForgetting(true)
+    setError('')
+    try {
+      const response = await fetch(`/api/lab/profiles/${selectedId}/memory`, { method: 'DELETE' })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data?.detail || 'Не удалось сбросить память')
+      setMemory((current) => (
+        current
+          ? { ...current, hasMemory: false, entities: [], facts: [], entityCount: 0, factCount: 0 }
+          : current
+      ))
+      setDetail((current) => (
+        current ? { ...current, hasMemory: false, memoryGraphId: null } : current
+      ))
+      setDossiers((current) => current.map((item) => (
+        item.id === selectedId ? { ...item, hasMemory: false } : item
+      )))
+      setConfirmForget(false)
+      setNotice(data.clearedGraph
+        ? 'Память персонажа полностью стёрта.'
+        : 'У персонажа уже не было памяти.')
+    } catch (err) {
+      setError(err.message || 'Ошибка сброса памяти.')
+    } finally {
+      setForgetting(false)
+    }
+  }
+
   if (!open) return null
 
   return (
@@ -213,6 +336,7 @@ export default function LabDrawer({ open, onClose }) {
 
         <div className="drawer-content lab-content">
           {error && <div className="drawer-empty lab-error">{error}</div>}
+          {notice && !error && <div className="drawer-empty lab-notice">{notice}</div>}
 
           {!detail && loadingList && <div className="drawer-empty">Собираем досье...</div>}
           {!detail && !loadingList && !error && dossiers.length === 0 && (
@@ -229,7 +353,16 @@ export default function LabDrawer({ open, onClose }) {
 
           {detail && loadingDetail && <div className="drawer-empty">Открываем досье...</div>}
           {detail && !loadingDetail && (
-            <DossierView dossier={detail} onBack={() => setSelectedId(null)} />
+            <DossierView
+              dossier={detail}
+              memory={memory}
+              confirmForget={confirmForget}
+              forgetting={forgetting}
+              onBack={() => setSelectedId(null)}
+              onAskForget={() => setConfirmForget(true)}
+              onCancelForget={() => setConfirmForget(false)}
+              onForget={forgetMemory}
+            />
           )}
         </div>
       </aside>

@@ -42,13 +42,27 @@ const DOSSIER = {
   ],
 }
 
-function mockFetch() {
+const MEMORY = {
+  profileId: 'char_1',
+  graphId: 'char_1',
+  hasMemory: true,
+  entities: [],
+  facts: [],
+  entries: ['Тема: стратегия выхода на рынок. Логос предлагал сфокусироваться на B2B.'],
+  entityCount: 0,
+  factCount: 0,
+}
+
+function mockFetch({ memory = MEMORY } = {}) {
   vi.stubGlobal('fetch', vi.fn((url) => {
     if (String(url).endsWith('/api/lab/profiles')) {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ dossiers: DOSSIERS }) })
     }
     if (String(url) === '/api/lab/profiles/char_1') {
       return Promise.resolve({ ok: true, json: () => Promise.resolve(DOSSIER) })
+    }
+    if (String(url) === '/api/lab/profiles/char_1/memory' && memory) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(memory) })
     }
     return Promise.resolve({ ok: false })
   }))
@@ -81,5 +95,34 @@ describe('LabDrawer', () => {
     expect(screen.getByText(/Аналитик раунда/)).toBeTruthy()
     expect(screen.getByText('← Ко всем персонажам')).toBeTruthy()
     expect(screen.getByText('Логос усилил показатель «Инсайт».')).toBeTruthy()
+  })
+
+  it('shows raw memory entries and forget flow inside dossier', async () => {
+    const user = userEvent.setup()
+    render(<LabDrawer open onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByText('Логос')).toBeTruthy())
+    await user.click(screen.getByText('Логос'))
+
+    await waitFor(() => expect(screen.getByText(/Сырых записей: 1/)).toBeTruthy())
+    expect(screen.getByText(/Логос предлагал сфокусироваться/)).toBeTruthy()
+    expect(screen.getByText('🧹 Забыть всё')).toBeTruthy()
+
+    await user.click(screen.getByText('🧹 Забыть всё'))
+    expect(screen.getByText('Стереть всю память?')).toBeTruthy()
+    expect(screen.getByText('Да, забыть')).toBeTruthy()
+    expect(screen.getByText('Отмена')).toBeTruthy()
+  })
+
+  it('hides memory section content when character has no memory', async () => {
+    const user = userEvent.setup()
+    mockFetch({
+      memory: { hasMemory: false, entities: [], facts: [], entries: [], entityCount: 0, factCount: 0 },
+    })
+    render(<LabDrawer open onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByText('Логос')).toBeTruthy())
+    await user.click(screen.getByText('Логос'))
+
+    await waitFor(() => expect(screen.getByText(/Памяти пока нет/)).toBeTruthy())
+    expect(screen.queryByText('🧹 Забыть всё')).toBeNull()
   })
 })

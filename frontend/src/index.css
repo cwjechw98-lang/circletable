@@ -4398,6 +4398,75 @@ body.is-resizing-chat * {
   color: var(--muted);
 }
 
+.dossier-memory {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--pixel) * 1.5);
+}
+
+.dossier-memory-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: calc(var(--pixel) * 1.5);
+}
+
+.dossier-memory-count {
+  font-family: var(--font-mono);
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text);
+  background: var(--control-chip-bg);
+  border: 1px solid var(--control-chip-border);
+  padding: 2px 6px;
+}
+
+.dossier-forget {
+  margin-left: auto;
+}
+
+.dossier-forget-confirm {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: calc(var(--pixel));
+  font-family: var(--font-mono);
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--red);
+}
+
+.dossier-memory-entities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--pixel));
+}
+
+.dossier-memory-entity {
+  font-family: var(--font-mono);
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text);
+  background: var(--control-chip-bg);
+  border: 1px solid var(--control-chip-border);
+  padding: 2px 8px;
+  cursor: help;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dossier-memory-more {
+  font-family: var(--font-mono);
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--muted);
+  align-self: center;
+}
+
+.dossier-memory-note-title {
+  font-family: var(--font-mono);
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--muted);
+}
+
 .dossier-achievements,
 .dossier-notes {
   list-style: none;
