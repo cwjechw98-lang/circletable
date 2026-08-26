@@ -79,10 +79,25 @@ export default function useAppRealtimeState({
   const [streamTexts, setStreamTexts] = useState({})
   const [emotions, setEmotions] = useState({})
   const [announce, setAnnounce] = useState(null)
+  const [backgroundJobs, setBackgroundJobs] = useState([])
 
   const processedEventsRef = useRef(new Set())
   const responseTimingRef = useRef({})
   const activeParticipantsRef = useRef([])
+
+  // Фоновые задачи (переиндексация памяти, графы знаний): до 6 последних,
+  // активные видны в шапке постоянно, завершённые гаснут сами через 6с.
+  function upsertBackgroundJob(job) {
+    setBackgroundJobs((prev) => {
+      const rest = prev.filter((item) => item.id !== job.id)
+      return [{ ...job, at: Date.now() }, ...rest].slice(0, 6)
+    })
+    if (!job.active) {
+      window.setTimeout(() => {
+        setBackgroundJobs((prev) => prev.filter((item) => item.id !== job.id))
+      }, 6000)
+    }
+  }
   const currentRoomIdRef = useRef(null)
   const currentSessionIdRef = useRef(null)
 
@@ -557,6 +572,51 @@ export default function useAppRealtimeState({
         }
         break
 
+      case 'memory_reindex_progress': {
+        const done = data.status === 'done'
+        const failed = data.status === 'error'
+        upsertBackgroundJob({
+          id: `reindex:${data.profileId}`,
+          kind: 'memory',
+          label: 'Пересборка памяти',
+          detail: done
+            ? `готово · ${data.processed ?? 0} записей`
+            : failed
+              ? `ошибка: ${data.error || 'неизвестно'}`
+              : `${data.processed ?? 0}/${data.total ?? '?'} записей`,
+          status: data.status,
+          active: !done && !failed,
+        })
+        break
+      }
+
+      case 'knowledge_graph_started':
+      case 'knowledge_graph_updated':
+      case 'knowledge_graph_status': {
+        if (!data.roomId && !data.graphId) break
+        upsertBackgroundJob({
+          id: `kg:${data.roomId || data.graphId}`,
+          kind: 'kg',
+          label: 'Граф знаний',
+          detail: data.status === 'building' ? 'строится…' : (data.status || 'обновлён'),
+          status: data.status || 'ready',
+          active: data.status === 'building',
+        })
+        break
+      }
+
+      case 'knowledge_graph_deleted': {
+        upsertBackgroundJob({
+          id: `kg:${data.roomId || data.graphId || '*'}`,
+          kind: 'kg',
+          label: 'Граф знаний',
+          detail: 'удалён',
+          status: 'deleted',
+          active: false,
+        })
+        break
+      }
+
       case 'reset':
         resetResponseMetrics()
         setSession(null)
@@ -735,6 +795,7 @@ export default function useAppRealtimeState({
         speakingSet,
         streamTexts,
         emotions,
+        backgroundJobs,
       },
       derived: {
         activeParticipants,

@@ -66,6 +66,14 @@ async def _run_reindex(runtime, profile_id: str) -> dict:
     async def _task():
         state = _REINDEX_STATE[profile_id]
         try:
+            # Мгновенный сигнал старта: иначе до первого батча (минуты) UI молчит.
+            await runtime.manager.broadcast({
+                "type": "memory_reindex_progress",
+                "profileId": profile_id,
+                "status": "running",
+                "processed": 0,
+                "total": state["total"],
+            })
             await asyncio.to_thread(delete_profile_graph, graph_id)
             fresh_graph_id = create_profile_graph(profile_id)
             runtime.repository.set_profile_memory_graph_id(profile_id, fresh_graph_id)

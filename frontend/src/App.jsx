@@ -168,6 +168,7 @@ export default function App() {
         speakingSet,
         streamTexts,
         emotions,
+        backgroundJobs,
       },
       derived: {
         activeParticipants,
@@ -461,6 +462,18 @@ export default function App() {
             <div className={`status-led${connected ? ' on' : ''}`} />
             {connected ? 'На связи' : 'Подключение...'}
           </div>
+          {Array.isArray(backgroundJobs) && backgroundJobs.length > 0 && (
+            <div
+              className="header-jobs"
+              data-hint="Фоновые задачи: пересборка памяти профилей и построение графов знаний. Прогресс обновляется в реальном времени."
+            >
+              {backgroundJobs.map((job) => (
+                <span key={job.id} className={`header-job is-${job.status}`}>
+                  ⚙ {job.label}: {job.detail}
+                </span>
+              ))}
+            </div>
+          )}
           <button
             className="pixel-btn danger header-exit-btn"
             onClick={handleShutdownApp}
