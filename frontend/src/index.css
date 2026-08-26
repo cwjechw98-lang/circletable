@@ -4660,6 +4660,22 @@ body.is-resizing-chat * {
   backdrop-filter: blur(2px);
 }
 
+/* Спотлайт-режим: подсветка реального элемента, затемнение остального. */
+.onboarding-spotlight {
+  position: fixed;
+  z-index: 299;
+  border-radius: 10px;
+  border: 2px solid var(--gold, var(--text));
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  transition: all 0.25s ease;
+}
+
+.onboarding-card.is-floating {
+  position: fixed;
+  z-index: 301;
+}
+
 .onboarding-card {
   position: relative;
   width: min(440px, calc(100vw - 32px));
