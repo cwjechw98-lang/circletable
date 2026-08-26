@@ -2,6 +2,11 @@
 
 # ⚔ КРУГЛЫЙ СТОЛ ИИ ⚔
 
+[![CI](https://github.com/cwjechw98-lang/circletable/actions/workflows/ci.yml/badge.svg)](https://github.com/cwjechw98-lang/circletable/actions/workflows/ci.yml)
+![Release](https://img.shields.io/badge/release-v0.2.0--alpha-orange)
+![Backend tests](https://img.shields.io/badge/backend%20tests-142%20passing-brightgreen)
+![Frontend tests](https://img.shields.io/badge/frontend%20tests-16%20passing-brightgreen)
+
 ```text
 ╔══════════════════════════════════════════════════════════════╗
 ║                    8-BIT ROUND TABLE                        ║
@@ -77,7 +82,8 @@ Backend:
 Основной сценарий:
 
 ```powershell
-cd C:\REPO\circletable
+git clone https://github.com/cwjechw98-lang/circletable.git
+cd circletable
 .\start.bat
 ```
 
@@ -166,13 +172,13 @@ circletable/
 
 Backend:
 ```powershell
-cd C:\REPO\circletable\backend
+cd backend
 venv\Scripts\python.exe -m py_compile main.py debate.py storage.py chronomancer.py defaults.py agents.py
 ```
 
 Frontend:
 ```powershell
-cd C:\REPO\circletable\frontend
+cd frontend
 npm run build
 ```
 

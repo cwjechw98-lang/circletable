@@ -19,39 +19,39 @@
 ## 2. Главные точки входа
 
 Backend:
-- [backend/main.py](C:\REPO\circletable\backend\main.py)
-- [backend/debate.py](C:\REPO\circletable\backend\debate.py)
-- [backend/storage.py](C:\REPO\circletable\backend\storage.py)
-- [backend/chronomancer.py](C:\REPO\circletable\backend\chronomancer.py)
-- [backend/casting.py](C:\REPO\circletable\backend\casting.py)
-- [backend/defaults.py](C:\REPO\circletable\backend\defaults.py)
+- [backend/main.py](backend/main.py)
+- [backend/debate.py](backend/debate.py)
+- [backend/storage.py](backend/storage.py)
+- [backend/chronomancer.py](backend/chronomancer.py)
+- [backend/casting.py](backend/casting.py)
+- [backend/defaults.py](backend/defaults.py)
 
 Frontend:
-- [frontend/src/App.jsx](C:\REPO\circletable\frontend\src\App.jsx)
-- [frontend/src/components/ControlPanel.jsx](C:\REPO\circletable\frontend\src\components\ControlPanel.jsx)
-- [frontend/src/components/RoomsDrawer.jsx](C:\REPO\circletable\frontend\src\components\RoomsDrawer.jsx)
-- [frontend/src/components/InventoryDrawer.jsx](C:\REPO\circletable\frontend\src\components\InventoryDrawer.jsx)
-- [frontend/src/components/CastingAssistantModal.jsx](C:\REPO\circletable\frontend\src\components\CastingAssistantModal.jsx)
-- [frontend/src/components/ChatPanel.jsx](C:\REPO\circletable\frontend\src\components\ChatPanel.jsx)
-- [frontend/src/index.css](C:\REPO\circletable\frontend\src\index.css)
-- [frontend/index.html](C:\REPO\circletable\frontend\index.html)
+- [frontend/src/App.jsx](frontend/src/App.jsx)
+- [frontend/src/components/ControlPanel.jsx](frontend/src/components/ControlPanel.jsx)
+- [frontend/src/components/RoomsDrawer.jsx](frontend/src/components/RoomsDrawer.jsx)
+- [frontend/src/components/InventoryDrawer.jsx](frontend/src/components/InventoryDrawer.jsx)
+- [frontend/src/components/CastingAssistantModal.jsx](frontend/src/components/CastingAssistantModal.jsx)
+- [frontend/src/components/ChatPanel.jsx](frontend/src/components/ChatPanel.jsx)
+- [frontend/src/index.css](frontend/src/index.css)
+- [frontend/index.html](frontend/index.html)
 
 ## 3. Как запускать проект
 
 Основной пользовательский сценарий:
-- [start.bat](C:\REPO\circletable\start.bat)
+- [start.bat](start.bat)
 
 Что он делает:
 - проверяет `Ollama`;
 - пытается подготовить стартовую локальную модель;
-- запускает backend и frontend через [start_core.bat](C:\REPO\circletable\start_core.bat).
+- запускает backend и frontend через [start_core.bat](start_core.bat).
 
 Полезные вспомогательные сценарии:
-- [00_check_ollama.bat](C:\REPO\circletable\00_check_ollama.bat) — проверка `Ollama`
-- [01_prepare_ollama_models.bat](C:\REPO\circletable\01_prepare_ollama_models.bat) — установка стартовой локальной модели
-- [02_refresh_project_models.bat](C:\REPO\circletable\02_refresh_project_models.bat) — обновление списка моделей в проекте
-- [03_start_round_table.bat](C:\REPO\circletable\03_start_round_table.bat) — алиас запуска
-- [04_shutdown_round_table.bat](C:\REPO\circletable\04_shutdown_round_table.bat) — ручное завершение dev-сеанса
+- [00_check_ollama.bat](00_check_ollama.bat) — проверка `Ollama`
+- [01_prepare_ollama_models.bat](01_prepare_ollama_models.bat) — установка стартовой локальной модели
+- [02_refresh_project_models.bat](02_refresh_project_models.bat) — обновление списка моделей в проекте
+- [03_start_round_table.bat](03_start_round_table.bat) — алиас запуска
+- [04_shutdown_round_table.bat](04_shutdown_round_table.bat) — ручное завершение dev-сеанса
 
 Обычные адреса:
 - backend: `http://127.0.0.1:43117`
@@ -60,7 +60,7 @@ Frontend:
 ## 4. Где хранится состояние
 
 Постоянная база:
-- [backend/data/circletable.db](C:\REPO\circletable\backend\data\circletable.db)
+- [backend/data/circletable.db](backend/data/circletable.db)
 
 Таблицы:
 - `app_state`
@@ -223,7 +223,7 @@ Frontend:
 ### Drawer комнат
 
 Файл:
-- [frontend/src/components/RoomsDrawer.jsx](C:\REPO\circletable\frontend\src\components\RoomsDrawer.jsx)
+- [frontend/src/components/RoomsDrawer.jsx](frontend/src/components/RoomsDrawer.jsx)
 
 Функции:
 - создание комнаты;
@@ -239,8 +239,8 @@ Frontend:
 ### Кастинг-помощник
 
 Файлы:
-- [backend/casting.py](C:\REPO\circletable\backend\casting.py)
-- [frontend/src/components/CastingAssistantModal.jsx](C:\REPO\circletable\frontend\src\components\CastingAssistantModal.jsx)
+- [backend/casting.py](backend/casting.py)
+- [frontend/src/components/CastingAssistantModal.jsx](frontend/src/components/CastingAssistantModal.jsx)
 
 Функции:
 - кнопка `Помощь` рядом с темой открывает окно подбора состава;
@@ -252,7 +252,7 @@ Frontend:
 ### Drawer инвентаря
 
 Файл:
-- [frontend/src/components/InventoryDrawer.jsx](C:\REPO\circletable\frontend\src\components\InventoryDrawer.jsx)
+- [frontend/src/components/InventoryDrawer.jsx](frontend/src/components/InventoryDrawer.jsx)
 
 Функции:
 - активные участники;
@@ -267,7 +267,7 @@ Frontend:
 ### Панель управления
 
 Файл:
-- [frontend/src/components/ControlPanel.jsx](C:\REPO\circletable\frontend\src\components\ControlPanel.jsx)
+- [frontend/src/components/ControlPanel.jsx](frontend/src/components/ControlPanel.jsx)
 
 Функции:
 - запуск сессии;
@@ -297,7 +297,7 @@ Frontend:
 - основной дефолт: `gemini-3-flash-preview:cloud`.
 
 Ключевой файл:
-- [backend/defaults.py](C:\REPO\circletable\backend\defaults.py)
+- [backend/defaults.py](backend/defaults.py)
 
 Дополнительно:
 - bootstrap базы обновляет системных персонажей на быстрый дефолт;
@@ -311,7 +311,7 @@ Frontend:
 ## 9. Хрономант
 
 Файл:
-- [backend/chronomancer.py](C:\REPO\circletable\backend\chronomancer.py)
+- [backend/chronomancer.py](backend/chronomancer.py)
 
 ### Что получает на вход
 - тему сессии;
@@ -337,9 +337,9 @@ Frontend:
 ## 10. Пауза и восстановление
 
 Файлы:
-- [backend/debate.py](C:\REPO\circletable\backend\debate.py)
-- [backend/storage.py](C:\REPO\circletable\backend\storage.py)
-- [backend/main.py](C:\REPO\circletable\backend\main.py)
+- [backend/debate.py](backend/debate.py)
+- [backend/storage.py](backend/storage.py)
+- [backend/main.py](backend/main.py)
 
 Текущая логика:
 - пауза не рвёт поток в середине сообщения;
@@ -351,10 +351,10 @@ Frontend:
 ## 11. Завершение dev-сеанса
 
 Файлы:
-- [backend/main.py](C:\REPO\circletable\backend\main.py)
-- [shutdown_round_table.ps1](C:\REPO\circletable\shutdown_round_table.ps1)
-- [04_shutdown_round_table.bat](C:\REPO\circletable\04_shutdown_round_table.bat)
-- [frontend/src/App.jsx](C:\REPO\circletable\frontend\src\App.jsx)
+- [backend/main.py](backend/main.py)
+- [shutdown_round_table.ps1](shutdown_round_table.ps1)
+- [04_shutdown_round_table.bat](04_shutdown_round_table.bat)
+- [frontend/src/App.jsx](frontend/src/App.jsx)
 
 Как это работает:
 - пользователь нажимает `Завершить сеанс`;
@@ -371,18 +371,18 @@ Frontend:
 ## 12. Что читать в первую очередь перед новой доработкой
 
 Если нужно быстро войти в проект, порядок такой:
-1. [SESSION_CHANGELOG.md](C:\REPO\circletable\SESSION_CHANGELOG.md)
-2. [backend/main.py](C:\REPO\circletable\backend\main.py)
-3. [backend/debate.py](C:\REPO\circletable\backend\debate.py)
-4. [backend/storage.py](C:\REPO\circletable\backend\storage.py)
-5. [backend/chronomancer.py](C:\REPO\circletable\backend\chronomancer.py)
-6. [backend/casting.py](C:\REPO\circletable\backend\casting.py)
-7. [backend/defaults.py](C:\REPO\circletable\backend\defaults.py)
-8. [frontend/src/App.jsx](C:\REPO\circletable\frontend\src\App.jsx)
-9. [frontend/src/components/ControlPanel.jsx](C:\REPO\circletable\frontend\src\components\ControlPanel.jsx)
-10. [frontend/src/components/InventoryDrawer.jsx](C:\REPO\circletable\frontend\src\components\InventoryDrawer.jsx)
-11. [frontend/src/components/RoomsDrawer.jsx](C:\REPO\circletable\frontend\src\components\RoomsDrawer.jsx)
-12. [frontend/src/components/CastingAssistantModal.jsx](C:\REPO\circletable\frontend\src\components\CastingAssistantModal.jsx)
+1. [SESSION_CHANGELOG.md](SESSION_CHANGELOG.md)
+2. [backend/main.py](backend/main.py)
+3. [backend/debate.py](backend/debate.py)
+4. [backend/storage.py](backend/storage.py)
+5. [backend/chronomancer.py](backend/chronomancer.py)
+6. [backend/casting.py](backend/casting.py)
+7. [backend/defaults.py](backend/defaults.py)
+8. [frontend/src/App.jsx](frontend/src/App.jsx)
+9. [frontend/src/components/ControlPanel.jsx](frontend/src/components/ControlPanel.jsx)
+10. [frontend/src/components/InventoryDrawer.jsx](frontend/src/components/InventoryDrawer.jsx)
+11. [frontend/src/components/RoomsDrawer.jsx](frontend/src/components/RoomsDrawer.jsx)
+12. [frontend/src/components/CastingAssistantModal.jsx](frontend/src/components/CastingAssistantModal.jsx)
 
 ## 13. Что ещё не доведено до идеала
 
@@ -406,35 +406,35 @@ Frontend:
 
 Backend:
 ```powershell
-cd C:\REPO\circletable\backend
+cd backend
 venv\Scripts\python.exe -m py_compile main.py debate.py storage.py chronomancer.py casting.py defaults.py agents.py
 ```
 
 Frontend:
 ```powershell
-cd C:\REPO\circletable\frontend
+cd frontend
 npm run build
 ```
 
 Dry-run shutdown helper:
 ```powershell
-powershell -ExecutionPolicy Bypass -File C:\REPO\circletable\shutdown_round_table.ps1 -DelaySeconds 0 -DryRun
+powershell -ExecutionPolicy Bypass -File .\shutdown_round_table.ps1 -DelaySeconds 0 -DryRun
 ```
 
 ## 16. Визуальные ассеты
 
 Подготовленные файлы:
-- [assets/github-header.svg](C:\REPO\circletable\assets\github-header.svg)
-- [assets/github-header.png](C:\REPO\circletable\assets\github-header.png)
-- [assets/repo-social-preview.svg](C:\REPO\circletable\assets\repo-social-preview.svg)
-- [assets/repo-social-preview.png](C:\REPO\circletable\assets\repo-social-preview.png)
-- [frontend/public/social-preview.svg](C:\REPO\circletable\frontend\public\social-preview.svg)
-- [frontend/public/social-preview.png](C:\REPO\circletable\frontend\public\social-preview.png)
-- [frontend/public/favicon.svg](C:\REPO\circletable\frontend\public\favicon.svg)
-- [frontend/public/favicon.png](C:\REPO\circletable\frontend\public\favicon.png)
-- [RELEASE_README.md](C:\REPO\circletable\RELEASE_README.md)
-- [RELEASE_v0.1.0.md](C:\REPO\circletable\RELEASE_v0.1.0.md)
-- [CHANGELOG.md](C:\REPO\circletable\CHANGELOG.md)
+- [assets/github-header.svg](assets/github-header.svg)
+- [assets/github-header.png](assets/github-header.png)
+- [assets/repo-social-preview.svg](assets/repo-social-preview.svg)
+- [assets/repo-social-preview.png](assets/repo-social-preview.png)
+- [frontend/public/social-preview.svg](frontend/public/social-preview.svg)
+- [frontend/public/social-preview.png](frontend/public/social-preview.png)
+- [frontend/public/favicon.svg](frontend/public/favicon.svg)
+- [frontend/public/favicon.png](frontend/public/favicon.png)
+- [RELEASE_README.md](RELEASE_README.md)
+- [RELEASE_v0.1.0.md](RELEASE_v0.1.0.md)
+- [CHANGELOG.md](CHANGELOG.md)
 
 ## 17. Последнее правило для следующего ИИ
 

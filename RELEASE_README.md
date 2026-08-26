@@ -46,7 +46,7 @@
 ## Быстрый старт
 
 ```powershell
-cd C:\REPO\circletable
+cd circletable
 .\start.bat
 ```
 
