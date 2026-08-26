@@ -235,7 +235,7 @@ class TestAgentPrompts:
 
     def test_memory_context_is_truncated_to_limit(self, monkeypatch):
         agent = self._make_agent()
-        long_memory = ("M" * 3900) + " Полное воспоминание." + ("N" * 300)
+        long_memory = ("M" * 1900) + " Полное воспоминание." + ("N" * 300)
         monkeypatch.setattr("agents.query_graph", lambda *args, **kwargs: long_memory)
         messages = agent._build_messages({
             "topic": "AI ethics",
@@ -246,7 +246,7 @@ class TestAgentPrompts:
         start = prompt.index("=== Твои прошлые рассуждения по схожим темам ===")
         end = prompt.index("===\nМожешь развивать прежние идеи или пересматривать позицию.")
         memory_block = prompt[start:end]
-        assert len(memory_block) <= 4200
+        assert len(memory_block) <= 2200  # MEMORY_CONTEXT_LIMIT (2000) + обвязка
         assert "Полное воспоминание." in memory_block
 
     def test_memory_query_mentions_current_participants(self, monkeypatch):

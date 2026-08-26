@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import random
 from dataclasses import dataclass
 from typing import Awaitable, Callable
@@ -21,6 +22,10 @@ from storage import Repository, utc_now
 
 
 logger = logging.getLogger(__name__)
+
+# Экономия токенов: сколько свежих сообщений стола видит агент целиком.
+# Более старые реплики уже сжаты в хронике сессии (session_chronicle).
+AGENT_HISTORY_LIMIT = int(os.getenv("AGENT_HISTORY_LIMIT") or 12)
 
 BroadcastFn = Callable[[dict], Awaitable[None]]
 
@@ -158,7 +163,7 @@ class DebateEngine:
         return clipped
 
     def _build_agent_history(self, session_id: str) -> list[dict]:
-        messages = self.repo.list_session_messages(session_id, limit=48)
+        messages = self.repo.list_session_messages(session_id, limit=AGENT_HISTORY_LIMIT)
         history = []
         for message in messages:
             author_type = message.get("author_type")

@@ -106,6 +106,7 @@ describe('LabDrawer', () => {
     await waitFor(() => expect(screen.getByText(/Сырых записей: 1/)).toBeTruthy())
     expect(screen.getByText(/Логос предлагал сфокусироваться/)).toBeTruthy()
     expect(screen.getByText('🧹 Забыть всё')).toBeTruthy()
+    expect(screen.getByText('♻️ Пересобрать')).toBeTruthy()
 
     await user.click(screen.getByText('🧹 Забыть всё'))
     expect(screen.getByText('Стереть всю память?')).toBeTruthy()

@@ -72,6 +72,48 @@ def run_async(coro):
     return future.result(timeout=600)
 
 
+# ── LLM для извлечения сущностей памяти (любой OpenAI-совместимый endpoint) ──
+# По умолчанию — Ollama. Чтобы не зависеть от аккаунта Ollama, задайте в backend/.env:
+#   MEMORY_LLM_BASE_URL=https://api.deepseek.com/v1   (или https://openrouter.ai/api/v1)
+#   MEMORY_LLM_MODEL=deepseek-chat
+#   MEMORY_LLM_API_KEY=sk-...
+MEMORY_LLM_BASE_URL = (
+    os.getenv("MEMORY_LLM_BASE_URL")
+    or os.getenv("OLLAMA_OPENAI_BASE_URL")
+    or OLLAMA_OPENAI_BASE
+).rstrip("/")
+if MEMORY_LLM_BASE_URL.endswith("/chat/completions"):
+    MEMORY_LLM_BASE_URL = MEMORY_LLM_BASE_URL[: -len("/chat/completions")]
+MEMORY_LLM_MODEL = os.getenv("MEMORY_LLM_MODEL") or os.getenv("LIGHTRAG_MODEL") or LIGHTRAG_MODEL
+MEMORY_LLM_API_KEY = os.getenv("MEMORY_LLM_API_KEY") or ""
+
+
+async def _memory_llm_call(messages: list[dict[str, str]], temperature: float) -> str:
+    payload = {
+        "model": MEMORY_LLM_MODEL,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": False,
+    }
+    headers = {"Content-Type": "application/json"}
+    if MEMORY_LLM_API_KEY:
+        headers["Authorization"] = f"Bearer {MEMORY_LLM_API_KEY}"
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                response = await client.post(f"{MEMORY_LLM_BASE_URL}/chat/completions", json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+        except Exception as exc:  # noqa: BLE001 - одна повторная попытка на сетевые сбои
+            last_error = exc
+            logger.warning("Память: вызов LLM %s/%s не удался (попытка %d): %s",
+                           MEMORY_LLM_BASE_URL, MEMORY_LLM_MODEL, attempt + 1, exc)
+            await asyncio.sleep(1.5)
+    raise last_error  # type: ignore[misc]
+
+
 async def _llm_model_func(
     prompt: str,
     system_prompt: str = "",
@@ -84,19 +126,7 @@ async def _llm_model_func(
         messages.append({"role": "system", "content": system_prompt})
     messages.extend(history_messages or [])
     messages.append({"role": "user", "content": prompt})
-
-    payload = {
-        "model": LIGHTRAG_MODEL,
-        "messages": messages,
-        "temperature": 0.0 if keyword_extraction else 0.3,
-        "stream": False,
-    }
-
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        response = await client.post(f"{OLLAMA_OPENAI_BASE}/chat/completions", json=payload)
-        response.raise_for_status()
-        data = response.json()
-    return data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+    return await _memory_llm_call(messages, 0.0 if keyword_extraction else 0.3)
 
 
 async def _embed_one(text: str) -> list[float]:
@@ -338,3 +368,27 @@ def get_profile_knowledge_graph(graph_id: str) -> dict[str, Any]:
 
 def get_profile_stored_texts(graph_id: str, *, limit: int = 40) -> list[str]:
     return get_stored_texts(graph_id, root_dir=PROFILE_GRAPH_ROOT, limit=limit)
+
+
+def read_graph_documents(graph_id: str, *, root_dir: Path | None = None) -> list[dict[str, Any]]:
+    """Все полные документы графа (content + create_time) для переиндексации."""
+    working_dir = _working_dir_for(graph_id, root_dir=root_dir)
+    path = working_dir / "kv_store_full_docs.json"
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    documents: list[dict[str, Any]] = []
+    for value in (data or {}).values():
+        if isinstance(value, dict) and isinstance(value.get("content"), str) and value["content"].strip():
+            documents.append({
+                "content": value["content"],
+                "create_time": value.get("create_time") or value.get("update_time") or 0,
+            })
+    return documents
+
+
+def read_profile_documents(graph_id: str) -> list[dict[str, Any]]:
+    return read_graph_documents(graph_id, root_dir=PROFILE_GRAPH_ROOT)

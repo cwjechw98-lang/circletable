@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from dataclasses import dataclass, field
 
 from knowledge.lightrag_adapter import PROFILE_GRAPH_ROOT, query_graph
 from providers import get_provider
 from tools import execute_agent_tool, get_tool_definitions
+
+
+# Экономия токенов: адаптивные лимиты контекста на реплику (символы).
+# Старые значения 8000/4000 раздували каждый ход; хроника сессии уже покрывает прошлое.
+RAG_CONTEXT_LIMIT = int(os.getenv("RAG_CONTEXT_LIMIT") or 4000)
+MEMORY_CONTEXT_LIMIT = int(os.getenv("MEMORY_CONTEXT_LIMIT") or 2000)
 
 
 # ────────────────────────────────────────────
@@ -440,7 +447,8 @@ class Agent:
             observer = f"Наблюдатель: {ctx['observer_provider']}/{ctx['observer_model']}"
         return ". ".join(part for part in [base, social, observer, recent] if part).strip()
 
-    def _truncate_rag_context(self, rag_context: str, limit: int = 8000) -> str:
+    def _truncate_rag_context(self, rag_context: str, limit: int | None = None) -> str:
+        limit = limit or RAG_CONTEXT_LIMIT
         text = (rag_context or "").strip()
         if len(text) <= limit:
             return text
@@ -484,7 +492,7 @@ class Agent:
                     rag_context = query_graph(graph_id, rag_query, mode="hybrid", top_k=20)
             except Exception:
                 rag_context = ""
-        rag_context = self._truncate_rag_context(rag_context, limit=8000) if rag_context else ""
+        rag_context = self._truncate_rag_context(rag_context, limit=RAG_CONTEXT_LIMIT) if rag_context else ""
 
         memory_context_supplied = "memory_context" in ctx
         memory_context = (ctx.get("memory_context") or "").strip()
@@ -501,7 +509,7 @@ class Agent:
                     )
             except Exception:
                 memory_context = ""
-        memory_context = self._truncate_rag_context(memory_context, limit=4000) if memory_context else ""
+        memory_context = self._truncate_rag_context(memory_context, limit=MEMORY_CONTEXT_LIMIT) if memory_context else ""
 
         msgs: list[dict] = [{
             "role": "system",

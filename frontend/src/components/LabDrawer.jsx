@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { getRoleLabel } from '../constants/roles.js'
 import { getSpecialtyLabel } from '../constants/specialties.js'
 import PixelSprite from './PixelSprite.jsx'
@@ -73,7 +73,7 @@ function LabCard({ dossier, onOpen }) {
   )
 }
 
-function DossierView({ dossier, memory, confirmForget, forgetting, onBack, onAskForget, onCancelForget, onForget }) {
+function DossierView({ dossier, memory, confirmForget, forgetting, reindexing, onBack, onAskForget, onCancelForget, onForget, onReindex }) {
   const mascot = resolveMascot(dossier)
   const career = dossier.career || {}
   return (
@@ -131,13 +131,23 @@ function DossierView({ dossier, memory, confirmForget, forgetting, onBack, onAsk
               <span className="dossier-memory-count">Сырых записей: {memory.entries.length}</span>
             )}
             {!confirmForget ? (
-              <button
-                className="pixel-btn danger dossier-forget"
-                onClick={onAskForget}
-                data-hint="Полностью стереть профильный граф памяти: персонаж забудет все прошлые сессии."
-              >
-                🧹 Забыть всё
-              </button>
+              <>
+                <button
+                  className="pixel-btn ghost dossier-reindex"
+                  onClick={onReindex}
+                  disabled={reindexing}
+                  data-hint="Заново извлечь сущности и связи из уже накопленных записей памяти (нужно, если память писалась со сломанной экстракцией)."
+                >
+                  {reindexing ? '♻️ Пересобираем...' : '♻️ Пересобрать'}
+                </button>
+                <button
+                  className="pixel-btn danger dossier-forget"
+                  onClick={onAskForget}
+                  data-hint="Полностью стереть профильный граф памяти: персонаж забудет все прошлые сессии."
+                >
+                  🧹 Забыть всё
+                </button>
+              </>
             ) : (
               <span className="dossier-forget-confirm">
                 Стереть всю память?
@@ -226,6 +236,8 @@ export default function LabDrawer({ open, onClose }) {
   const [forgetting, setForgetting] = useState(false)
   const [loadingList, setLoadingList] = useState(false)
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const [reindexing, setReindexing] = useState(false)
+  const pollActiveRef = useRef(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
@@ -279,6 +291,7 @@ export default function LabDrawer({ open, onClose }) {
       setConfirmForget(false)
       return
     }
+    pollActiveRef.current = false
     let cancelled = false
     fetch(`/api/lab/profiles/${selectedId}/memory`)
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error('Не удалось загрузить память'))))
@@ -321,6 +334,49 @@ export default function LabDrawer({ open, onClose }) {
     }
   }
 
+  async function reindexMemory() {
+    if (!selectedId || reindexing) return
+    setReindexing(true)
+    setError('')
+    setNotice('')
+    try {
+      const response = await fetch(`/api/lab/profiles/${selectedId}/memory/reindex`, { method: 'POST' })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data?.detail || 'Не удалось запустить пересборку памяти')
+      pollActiveRef.current = true
+      setNotice(`Пересборка запущена: записей к обработке — ${data.total}. Это может занять пару минут.`)
+      const deadline = Date.now() + 15 * 60 * 1000
+      while (Date.now() < deadline && pollActiveRef.current) {
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+        if (!pollActiveRef.current) return
+        const statusResponse = await fetch(`/api/lab/profiles/${selectedId}/memory/reindex-status`)
+        const status = await statusResponse.json()
+        if (status.status === 'running') {
+          setNotice(`Пересобираем память: ${status.processed}/${status.total}...`)
+          continue
+        }
+        if (status.status === 'done') {
+          const memResponse = await fetch(`/api/lab/profiles/${selectedId}/memory`)
+          if (memResponse.ok) setMemory(await memResponse.json())
+          setDetail((current) => (
+            current ? { ...current, hasMemory: true } : current
+          ))
+          setDossiers((current) => current.map((item) => (
+            item.id === selectedId ? { ...item, hasMemory: true } : item
+          )))
+          setNotice(`Память пересобрана: обработано ${status.processed} записей.`)
+          break
+        }
+        setError(status.error || 'Пересборка памяти не удалась.')
+        break
+      }
+    } catch (err) {
+      setError(err.message || 'Ошибка пересборки памяти.')
+    } finally {
+      setReindexing(false)
+    }
+  }
+
   if (!open) return null
 
   return (
@@ -359,9 +415,11 @@ export default function LabDrawer({ open, onClose }) {
               confirmForget={confirmForget}
               forgetting={forgetting}
               onBack={() => setSelectedId(null)}
+              reindexing={reindexing}
               onAskForget={() => setConfirmForget(true)}
               onCancelForget={() => setConfirmForget(false)}
               onForget={forgetMemory}
+              onReindex={reindexMemory}
             />
           )}
         </div>
