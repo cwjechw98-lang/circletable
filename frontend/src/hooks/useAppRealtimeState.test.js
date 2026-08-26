@@ -143,4 +143,37 @@ describe('useAppRealtimeState', () => {
     expect(onSocketClosed).toHaveBeenCalledTimes(1)
     expect(result.current.state.connection.connected).toBe(false)
   })
+
+  it('refetches providers on providers_changed and settings_updated markers', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ openai: ['gpt-4'], custom: ['custom:abc'] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ openai: ['gpt-4'], custom: ['custom:abc'], ollama: ['llama3'] }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAppRealtimeState({}))
+
+    await act(async () => {
+      capturedHandler({ type: 'providers_changed' })
+    })
+    expect(result.current.state.room.providers).toEqual({ openai: ['gpt-4'], custom: ['custom:abc'] })
+    expect(fetchMock).toHaveBeenCalledWith('/api/providers')
+
+    await act(async () => {
+      capturedHandler({ type: 'settings_updated' })
+    })
+    expect(result.current.state.room.providers).toEqual({
+      openai: ['gpt-4'],
+      custom: ['custom:abc'],
+      ollama: ['llama3'],
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    vi.unstubAllGlobals()
+  })
 })

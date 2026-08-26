@@ -98,6 +98,18 @@ export default function useAppRealtimeState({
       }, 6000)
     }
   }
+
+  // Маркерные события без payload (providers_changed/settings_updated):
+  // сами перечитываем справочник провайдеров — настройки и кастомные
+  // провайдеры применяются во всех открытых вкладках без F5.
+  function refreshProvidersFromApi() {
+    fetch('/api/providers')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (data && typeof data === 'object' && Object.keys(data).length > 0) setProviders(data)
+      })
+      .catch(() => {})
+  }
   const currentRoomIdRef = useRef(null)
   const currentSessionIdRef = useRef(null)
 
@@ -333,6 +345,14 @@ export default function useAppRealtimeState({
       case 'providers':
         onProvidersLoaded?.()
         setProviders(data.providers || {})
+        break
+
+      case 'providers_changed':
+        refreshProvidersFromApi()
+        break
+
+      case 'settings_updated':
+        refreshProvidersFromApi()
         break
 
       case 'room_loaded':
