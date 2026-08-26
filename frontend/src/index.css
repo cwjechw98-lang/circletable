@@ -4635,6 +4635,84 @@ body.is-resizing-chat * {
   50% { opacity: 0.65; }
 }
 
+/* Онбординг-тур: приветственная карточка новичка. */
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.onboarding-card {
+  position: relative;
+  width: min(440px, calc(100vw - 32px));
+  padding: 22px 24px 18px;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.35);
+  text-align: center;
+}
+
+.onboarding-emoji {
+  font-size: 30px;
+  margin-bottom: 8px;
+}
+
+.onboarding-title {
+  font-family: var(--font-pixel);
+  font-size: max(11px, calc(13px * var(--ui-font-scale)));
+  color: var(--gold, var(--text));
+  margin: 0 0 10px;
+}
+
+.onboarding-text {
+  font-size: max(10px, calc(12px * var(--ui-font-scale)));
+  line-height: 1.55;
+  color: var(--text);
+  margin: 0 0 14px;
+}
+
+.onboarding-dots {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.onboarding-dot {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+}
+
+.onboarding-dot.is-done { background: var(--muted); }
+.onboarding-dot.is-active { background: var(--gold, var(--text)); }
+
+.onboarding-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.onboarding-counter {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.header-help-btn {
+  min-width: 26px;
+  padding: 2px 7px;
+}
+
 /* Компактный режим ноутбуков: невысокие вьюпоты — меньше воздуха,
    больше контента, без горизонтального скролла. */
 @media (max-height: 800px) {

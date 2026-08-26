@@ -9,6 +9,7 @@ import LabDrawer from './components/LabDrawer.jsx'
 import ProvidersDrawer from './components/ProvidersDrawer.jsx'
 import TimedHintLayer from './components/TimedHintLayer.jsx'
 import TopicFocusOverlay from './components/TopicFocusOverlay.jsx'
+import OnboardingTour, { STORAGE_KEY as ONBOARDING_KEY } from './components/OnboardingTour.jsx'
 import useAppCommands from './hooks/useAppCommands.js'
 import useAppRealtimeState from './hooks/useAppRealtimeState.js'
 
@@ -123,6 +124,13 @@ export default function App() {
   const [labOpen, setLabOpen] = useState(false)
   const [providersOpen, setProvidersOpen] = useState(false)
   const [preprintGenerating, setPreprintGenerating] = useState(false)
+  const [tourOpen, setTourOpen] = useState(() => {
+    try {
+      return !window.localStorage.getItem(ONBOARDING_KEY)
+    } catch {
+      return false
+    }
+  })
   const [theme, setTheme] = useState(readTheme)
   const [uiFontScale, setUiFontScale] = useState(readUiFontScale)
   const [fontPanelOpen, setFontPanelOpen] = useState(false)
@@ -388,6 +396,7 @@ export default function App() {
         onConfirm={handleConfirmTopicEdit}
         onCancel={handleCancelTopicEdit}
       />
+      <OnboardingTour open={tourOpen} onClose={() => setTourOpen(false)} />
 
       {observerBusy && (
         <div className="observer-overlay">
@@ -462,6 +471,14 @@ export default function App() {
             <div className={`status-led${connected ? ' on' : ''}`} />
             {connected ? 'На связи' : 'Подключение...'}
           </div>
+          <button
+            type="button"
+            className="pixel-btn ghost header-help-btn"
+            onClick={() => setTourOpen(true)}
+            data-hint="Короткое знакомство с интерфейсом: комната, чат, отчёты и подсказки."
+          >
+            ?
+          </button>
           {Array.isArray(backgroundJobs) && backgroundJobs.length > 0 && (
             <div
               className="header-jobs"
