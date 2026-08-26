@@ -321,8 +321,8 @@ def get_knowledge_graph(graph_id: str, *, root_dir: Path | None = None) -> dict[
         graph = run_async(rag.get_knowledge_graph(node_label="*", max_depth=3, max_nodes=2000))
         if isinstance(graph, dict):
             return graph
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - деградация до пустого графа, но с причиной в журнале
+        logger.warning("Не удалось прочитать граф знаний: %s", exc)
 
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
@@ -361,8 +361,8 @@ def get_knowledge_graph(graph_id: str, *, root_dir: Path | None = None) -> dict[
                         },
                     }
                 )
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - частичный список фактов лучше падения, но с журналом
+        logger.warning("Не удалось собрать факты графа: %s", exc)
 
     return {
         "graph_id": graph_id,

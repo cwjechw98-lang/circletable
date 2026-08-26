@@ -358,7 +358,7 @@ def _decode_bing_url(url: str) -> str:
         payload += "=" * (-len(payload) % 4)
         try:
             return base64.urlsafe_b64decode(payload).decode("utf-8", errors="replace")
-        except Exception:
+        except Exception:  # noqa: BLE001 - намеренный фолбэк: не декодировалось → исходный URL
             pass
     return unquote(url)
 

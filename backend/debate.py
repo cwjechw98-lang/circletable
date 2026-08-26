@@ -1528,8 +1528,8 @@ class DebateEngine:
             )
             if session_insight:
                 self.repo.save_session_insight(session_insight)
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - инсайт не критичен для финала, но сбой должен быть виден
+            logger.warning("Сохранение инсайта сессии %s не удалось: %s", session_id, exc)
         final_summary = (review or {}).get("chronicle") or (review or {}).get("roundSummary") or "Сессия завершена."
         await self._broadcast({
             "type": "session_completed",
