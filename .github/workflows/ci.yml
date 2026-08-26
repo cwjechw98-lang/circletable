@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   backend-tests:
     name: Backend tests (pytest)
@@ -26,8 +29,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Run pytest
-        run: python -m pytest tests -q
+      - name: Run pytest (with JUnit report)
+        run: |
+          New-Item -ItemType Directory -Force ../artifacts | Out-Null
+          python -m pytest tests -q --junitxml=../artifacts/backend-junit.xml
+
+      - name: Generate backend badge JSON
+        run: |
+          $xml = [xml](Get-Content "$env:GITHUB_WORKSPACE/artifacts/backend-junit.xml")
+          $suites = @($xml.testsuites.testsuite)
+          $sum = { param($prop) (($suites | ForEach-Object { [int]$_.($prop) } | Measure-Object -Sum).Sum) }
+          $total  = & $sum 'tests'
+          $failed = & $sum 'failures'
+          $errors = & $sum 'errors'
+          $skip   = & $sum 'skipped'
+          $passed = [int]$total - [int]$failed - [int]$errors - [int]$skip
+          $color  = if ([int]$failed + [int]$errors -eq 0) { 'brightgreen' } else { 'red' }
+          @{ schemaVersion = 1; label = 'backend tests'; message = "$passed passing"; color = $color } |
+            ConvertTo-Json | Set-Content "$env:GITHUB_WORKSPACE/artifacts/backend-tests.json"
+          Get-Content "$env:GITHUB_WORKSPACE/artifacts/backend-tests.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: badge-backend
+          path: artifacts/backend-tests.json
+          if-no-files-found: error
 
   frontend-tests:
     name: Frontend tests (vitest)
@@ -47,8 +73,55 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run vitest
-        run: npx vitest run --reporter=basic
+      - name: Run vitest (with JSON report)
+        run: |
+          mkdir -p ../artifacts
+          npx vitest run --reporter=basic --reporter=json --outputFile=../artifacts/frontend-results.json
+
+      - name: Generate frontend badge JSON
+        run: |
+          node -e '
+            const fs = require("fs");
+            const r = JSON.parse(fs.readFileSync("../artifacts/frontend-results.json", "utf8"));
+            const passed = r.numPassedTests ?? 0;
+            const total = r.numTotalTests ?? 0;
+            const failed = total - passed;
+            const color = failed === 0 ? "brightgreen" : "red";
+            fs.writeFileSync("../artifacts/frontend-tests.json",
+              JSON.stringify({ schemaVersion: 1, label: "frontend tests", message: `${passed} passing`, color }));
+          '
+          cat ../artifacts/frontend-tests.json
 
       - name: Build production bundle
         run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: badge-frontend
+          path: artifacts/frontend-tests.json
+          if-no-files-found: error
+
+  publish-badges:
+    name: Publish test badges
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Download badge artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: badge-*
+          merge-multiple: true
+          path: badges-json
+
+      - name: Push badges to the badges branch
+        run: |
+          cd badges-json
+          ls -la
+          git init -q -b badges
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git add -A
+          git commit -qm "chore: update test badges"
+          git push -qf origin badges

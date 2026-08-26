@@ -4,8 +4,8 @@
 
 [![CI](https://github.com/cwjechw98-lang/circletable/actions/workflows/ci.yml/badge.svg)](https://github.com/cwjechw98-lang/circletable/actions/workflows/ci.yml)
 ![Release](https://img.shields.io/badge/release-v0.2.0--alpha-orange)
-![Backend tests](https://img.shields.io/badge/backend%20tests-142%20passing-brightgreen)
-![Frontend tests](https://img.shields.io/badge/frontend%20tests-16%20passing-brightgreen)
+![Backend tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cwjechw98-lang/circletable/badges/backend-tests.json&cacheSeconds=300)
+![Frontend tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cwjechw98-lang/circletable/badges/frontend-tests.json&cacheSeconds=300)
 
 ```text
 ╔══════════════════════════════════════════════════════════════╗
