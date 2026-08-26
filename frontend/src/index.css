@@ -4542,3 +4542,86 @@ body.is-resizing-chat * {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ============================================================
+   Читаемость на ноутбуках (14", ~1366×768) — пол 9px.
+   Ретро-пиксельный стиль сохраняется, но текст не мельче 9px:
+   max() удерживает базу из --ui-font-scale и одновременно пол.
+   Сгенерировано по аудиту: 39 правил имели кегль 6–8px.
+   ============================================================ */
+.agent-info-btn {
+  font-size: max(6px, 9px);
+  min-height: 24px;
+  min-width: 24px;
+}
+
+.agent-nametag {
+  font-size: max(7px, 9px);
+}
+
+.assistant-topic-label { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
+.character-name { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.chat-fact-check-title { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.chat-header { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.chat-msg-name { font-size: max(calc(7px * var(--ui-font-scale)), 10px); }
+.chat-msg-round { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
+.chat-reaction-tag { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
+.chat-report-btn { font-size: max(calc(7px * var(--ui-font-scale)), 9px); min-height: 24px; }
+.chat-report-kicker { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
+.chat-report-markdown h3 { font-size: max(calc(8px * var(--ui-font-scale)), 10px); }
+.chat-report-title { font-size: max(calc(8px * var(--ui-font-scale)), 10px); }
+.chat-round-badge { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.documents-delete-btn { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
+.documents-panel-toggle { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.dossier-achievement-round { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
+.dossier-stat-label { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.drawer-kicker { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
+.empty-state { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.event-card-round { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
+.event-delete { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; min-width: 24px; }
+.expertise-toggle { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
+.header-exit-btn { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
+.internet-settings-title { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.observer-banner-title { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.observer-decision-head { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.observer-roster-title { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.pixel-btn.add { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
+.planned-events-toggle { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
+.preset-panel-title { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.builder-title { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.preset-panel-toggle { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
+.provider-preset-label { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.scene-zoom-title { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
+.theme-switcher span { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
+.ui-font-title { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
+.ui-font-toggle { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
+.mascot-snooze span:nth-child(2),
+.mascot-snooze span:nth-child(3) { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
+
+.chat-scroll-toggle,
+.chat-pin-toggle,
+.observer-collapse-btn {
+  min-height: 24px;
+}
+
+/* Компактный режим ноутбуков: невысокие вьюпоты — меньше воздуха,
+   больше контента, без горизонтального скролла. */
+@media (max-height: 800px) {
+  .app-header {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .control-panel {
+    padding-top: 8px;
+    padding-bottom: 10px;
+  }
+
+  .chat-messages {
+    padding: 8px;
+  }
+
+  .chat-panel {
+    gap: 6px;
+  }
+}
