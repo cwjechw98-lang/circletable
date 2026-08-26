@@ -280,6 +280,21 @@ CREATE TABLE IF NOT EXISTS app_settings (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS token_usage (
+    id TEXT PRIMARY KEY,
+    session_id TEXT,
+    room_id TEXT,
+    round_number INTEGER,
+    kind TEXT NOT NULL,
+    provider TEXT,
+    model TEXT,
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_usage_session ON token_usage(session_id);
+
 CREATE INDEX IF NOT EXISTS idx_profiles_saved_updated
     ON character_profiles(is_saved, updated_at, name);
 CREATE INDEX IF NOT EXISTS idx_room_participants_room_status_position

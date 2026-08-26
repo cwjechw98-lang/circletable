@@ -26,6 +26,7 @@ export default function useAppCommands({
   setReportError,
   setFactCheck,
   setFactCheckError,
+  setPreprintGenerating,
 }) {
   const handleTopicDraftChange = useCallback((nextTopic) => {
     setTopicDraft(nextTopic)
@@ -299,6 +300,30 @@ export default function useAppCommands({
     window.URL.revokeObjectURL(url)
   }, [report?.markdown, session?.id])
 
+  const handleGeneratePreprint = useCallback(async () => {
+    if (!session?.id) return
+    setPreprintGenerating(true)
+    try {
+      const data = await apiJson(`/api/preprint/${session.id}`, { method: 'POST', body: JSON.stringify({}) })
+      const markdown = data?.markdown
+      if (markdown) {
+        const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+        const url = window.URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `preprint-${session.id}.md`
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        window.URL.revokeObjectURL(url)
+      }
+    } catch (error) {
+      console.error('Препринт не удался:', error)
+    } finally {
+      setPreprintGenerating(false)
+    }
+  }, [apiJson, session?.id])
+
   const handleRunFactCheck = useCallback(async (scope) => {
     if (!session?.id) return
     try {
@@ -383,6 +408,7 @@ export default function useAppCommands({
     handleDensityModeChange,
     handleGenerateReport,
     handleDownloadReport,
+    handleGeneratePreprint,
     handleRunFactCheck,
     handleCreatePlannedEvent,
     handleUpdatePlannedEvent,

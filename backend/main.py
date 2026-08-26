@@ -14,6 +14,7 @@ from http_api.helpers import build_init_payload
 from http_api.routes_casting import router as casting_router
 from http_api.routes_characters import router as characters_router
 from http_api.routes_custom_providers import router as custom_providers_router
+from http_api.routes_export import router as export_router
 from http_api.routes_lab import router as lab_router
 from http_api.routes_settings import router as settings_router
 from http_api.routes_orchestrator import router as orchestrator_router
@@ -54,6 +55,7 @@ def create_app(*, runtime_factory: RuntimeFactory | None = None) -> FastAPI:
         orchestrator_router,
         custom_providers_router,
         settings_router,
+        export_router,
     ):
         app_instance.include_router(router)
 

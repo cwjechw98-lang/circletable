@@ -21,6 +21,7 @@ from knowledge.lightrag_adapter import (
 from meta_memory import format_insight_recall, select_relevant_session_insights, store_session_memories
 from providers import get_provider
 from storage import Repository, utc_now
+from token_accounting import record_usage
 
 
 logger = logging.getLogger(__name__)
@@ -1146,6 +1147,20 @@ class DebateEngine:
             "content": accumulated,
             "mentions": mentions,
         }
+        record_usage(
+            self.repo,
+            session_id=prepared.session_id,
+            room_id=prepared.room_id,
+            round_number=prepared.round_number,
+            kind="agent_message",
+            provider=participant.get("provider"),
+            model=participant.get("model"),
+            prompt_text="\n".join(
+                str(item.get("content") or "")
+                for item in (context.get("history") or [])
+            ) + (context.get("session_chronicle") or ""),
+            completion_text=accumulated,
+        )
         self._last_turn_committed_at = asyncio.get_running_loop().time()
         self._round_started_at = None
 
@@ -1250,6 +1265,17 @@ class DebateEngine:
             message_type="agent_reaction",
             author_type="agent",
             participant_id=reactor["id"],
+        )
+        record_usage(
+            self.repo,
+            session_id=session_id,
+            room_id=room_id,
+            round_number=round_state.round_number,
+            kind="agent_reaction",
+            provider=reactor.get("provider"),
+            model=reactor.get("model"),
+            prompt_text=prompt,
+            completion_text=text,
         )
         await self._broadcast(stored)
         return stored
@@ -1356,6 +1382,21 @@ class DebateEngine:
         self.repo.complete_round(round_state.round_id, review)
         self.repo.save_observer_review(room_id, session_id, round_state.round_id, round_state.round_number, review)
         self.repo.apply_stats_delta(review.get("statsDelta", {}), review.get("participantComments", {}))
+        record_usage(
+            self.repo,
+            session_id=session_id,
+            room_id=room_id,
+            round_number=round_state.round_number,
+            kind="observer_review",
+            provider=observer_provider,
+            model=observer_model,
+            prompt_text=(session["chronicle"] or "") + "\n".join(
+                str(msg.get("content") or "")
+                for msg in self.repo.list_round_messages(session_id, round_state.round_number)
+            ),
+            completion_text=json.dumps(review.get("summary") or "", ensure_ascii=False)
+            + (review.get("chronicle") or ""),
+        )
 
         next_fields = {
             "chronicle": review["chronicle"],

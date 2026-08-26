@@ -51,6 +51,8 @@ export default function ChatPanel({
   reportError,
   onGenerateReport,
   onDownloadReport,
+  onGeneratePreprint = () => {},
+  preprintGenerating = false,
   factCheck,
   factCheckError,
 }) {
@@ -141,6 +143,26 @@ export default function ChatPanel({
                   >
                     Скачать .md
                   </button>
+                )}
+                {canGenerateReport && (
+                  <>
+                    <a
+                      className="chat-report-btn ghost"
+                      href={`/api/export/session/${session.id}?format=sharegpt`}
+                      data-hint="Экспорт траектории обсуждения в ShareGPT-JSONL — для fine-tuning или публикации материалов."
+                    >
+                      ⬇ JSONL
+                    </a>
+                    <button
+                      type="button"
+                      className="chat-report-btn ghost"
+                      onClick={onGeneratePreprint}
+                      disabled={preprintGenerating}
+                      data-hint="Собрать препринт «постановка → метод → результаты» по протоколу сессии и скачать .md."
+                    >
+                      {preprintGenerating ? 'Пишем...' : '📄 Препринт'}
+                    </button>
+                  </>
                 )}
               </div>
             </div>

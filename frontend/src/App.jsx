@@ -122,6 +122,7 @@ export default function App() {
   const [inventoryOpen, setInventoryOpen] = useState(false)
   const [labOpen, setLabOpen] = useState(false)
   const [providersOpen, setProvidersOpen] = useState(false)
+  const [preprintGenerating, setPreprintGenerating] = useState(false)
   const [theme, setTheme] = useState(readTheme)
   const [uiFontScale, setUiFontScale] = useState(readUiFontScale)
   const [fontPanelOpen, setFontPanelOpen] = useState(false)
@@ -248,6 +249,7 @@ export default function App() {
     handleDensityModeChange,
     handleGenerateReport,
     handleDownloadReport,
+    handleGeneratePreprint,
     handleRunFactCheck,
     handleCreatePlannedEvent,
     handleUpdatePlannedEvent,
@@ -278,6 +280,7 @@ export default function App() {
     setReportError,
     setFactCheck,
     setFactCheckError,
+    setPreprintGenerating,
   })
 
   useEffect(() => {
@@ -571,6 +574,8 @@ export default function App() {
         reportError={reportError}
         onGenerateReport={handleGenerateReport}
         onDownloadReport={handleDownloadReport}
+        onGeneratePreprint={handleGeneratePreprint}
+        preprintGenerating={preprintGenerating}
         factCheck={factCheck}
         factCheckError={factCheckError}
       />

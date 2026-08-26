@@ -112,6 +112,11 @@ def get_memory_llm_config() -> dict[str, str]:
     }
 
 
+async def memory_llm_chat(messages: list[dict[str, str]], temperature: float = 0.3) -> str:
+    """Публичный доступ к настроенной LLM памяти (препринты, будущие механизмы)."""
+    return await _memory_llm_call(messages, temperature)
+
+
 async def _memory_llm_call(messages: list[dict[str, str]], temperature: float) -> str:
     config = get_memory_llm_config()
     payload = {
@@ -124,18 +129,27 @@ async def _memory_llm_call(messages: list[dict[str, str]], temperature: float) -
     if config["api_key"]:
         headers["Authorization"] = f"Bearer {config['api_key']}"
     last_error: Exception | None = None
-    for attempt in range(2):
+    # До 4 попыток: ретраи переживают rate-limit'ы шлюзов (OpenRouter отдаёт 429).
+    for attempt, pause in enumerate((0.0, 2.0, 6.0, 14.0)):
+        if pause:
+            await asyncio.sleep(pause)
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
                 response = await client.post(f"{config['base_url']}/chat/completions", json=payload, headers=headers)
+                if response.status_code == 429:
+                    retry_after = response.headers.get("retry-after")
+                    delay = float(retry_after) if retry_after and retry_after.replace(".", "").isdigit() else 8.0
+                    logger.warning("Память: %s вернул 429, ждём %.1fс", config["base_url"], delay)
+                    last_error = RuntimeError("429 Too Many Requests")
+                    await asyncio.sleep(delay)
+                    continue
                 response.raise_for_status()
                 data = response.json()
             return data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
-        except Exception as exc:  # noqa: BLE001 - одна повторная попытка на сетевые сбои
+        except Exception as exc:  # noqa: BLE001 - повторная попытка на сетевые сбои
             last_error = exc
             logger.warning("Память: вызов LLM %s/%s не удался (попытка %d): %s",
                            config["base_url"], config["model"], attempt + 1, exc)
-            await asyncio.sleep(1.5)
     raise last_error  # type: ignore[misc]
 
 

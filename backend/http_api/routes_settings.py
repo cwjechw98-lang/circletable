@@ -85,20 +85,38 @@ async def test_memory_llm(request: Request):
     if config["api_key"]:
         headers["Authorization"] = f"Bearer {config['api_key']}"
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 f"{config['base_url']}/chat/completions",
                 json={
                     "model": config["model"],
                     "messages": [{"role": "user", "content": "Ответь одним словом: ОК"}],
                     "stream": False,
-                    "max_tokens": 10,
+                    # reasoning-модели тратят бюджет на размышления — даём запас
+                    "max_tokens": 400,
                 },
                 headers=headers,
             )
             response.raise_for_status()
             data = response.json()
         content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
-        return {"ok": True, "baseUrl": config["base_url"], "model": config["model"], "sample": (content or "").strip()[:60]}
+        usage = data.get("usage") or {}
+        return {
+            "ok": True,
+            "baseUrl": config["base_url"],
+            "model": config["model"],
+            "sample": (content or "").strip()[:60],
+            "usage": {
+                "promptTokens": usage.get("prompt_tokens"),
+                "completionTokens": usage.get("completion_tokens"),
+                "cost": usage.get("cost"),
+            },
+        }
     except Exception as exc:  # noqa: BLE001 - ошибку отдаём пользователю в UI
         raise HTTPException(status_code=502, detail=f"LLM памяти недоступна: {exc}")
+
+
+@router.get("/api/stats/tokens/{session_id}")
+async def token_usage_stats(request: Request, session_id: str):
+    runtime = get_runtime(request)
+    return runtime.repository.token_usage_summary(session_id)

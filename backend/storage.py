@@ -710,6 +710,65 @@ class Repository:
         rows = self.conn.execute("SELECT key, value FROM app_settings").fetchall()
         return {row["key"]: row["value"] for row in rows}
 
+    def add_token_usage(
+        self,
+        *,
+        id: str,
+        session_id: str | None,
+        room_id: str | None,
+        round_number: int | None,
+        kind: str,
+        provider: str | None,
+        model: str | None,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+    ):
+        self.conn.execute(
+            """
+            INSERT INTO token_usage
+                (id, session_id, room_id, round_number, kind, provider, model, prompt_tokens, completion_tokens, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (id, session_id, room_id, round_number, kind, provider, model, prompt_tokens, completion_tokens, utc_now()),
+        )
+        self.conn.commit()
+
+    def token_usage_summary(self, session_id: str) -> dict:
+        rows = self.conn.execute(
+            "SELECT kind, model, round_number, prompt_tokens, completion_tokens FROM token_usage WHERE session_id = ?",
+            (session_id,),
+        ).fetchall()
+        by_kind: dict[str, dict] = {}
+        by_model: dict[str, dict] = {}
+        by_round: dict[int, dict] = {}
+        total_prompt = total_completion = 0
+        for row in rows:
+            for bucket, key in ((by_kind, row["kind"]), (by_model, row["model"] or "—")):
+                cell = bucket.setdefault(key, {"calls": 0, "promptTokens": 0, "completionTokens": 0})
+                cell["calls"] += 1
+                cell["promptTokens"] += row["prompt_tokens"]
+                cell["completionTokens"] += row["completion_tokens"]
+            rcell = by_round.setdefault(row["round_number"] or 0, {"calls": 0, "promptTokens": 0, "completionTokens": 0})
+            rcell["calls"] += 1
+            rcell["promptTokens"] += row["prompt_tokens"]
+            rcell["completionTokens"] += row["completion_tokens"]
+            total_prompt += row["prompt_tokens"]
+            total_completion += row["completion_tokens"]
+        return {
+            "sessionId": session_id,
+            "total": {
+                "calls": len(rows),
+                "promptTokens": total_prompt,
+                "completionTokens": total_completion,
+            },
+            "byKind": by_kind,
+            "byModel": by_model,
+            "byRound": [
+                {"round": rnd, **cells}
+                for rnd, cells in sorted(by_round.items(), key=lambda item: item[0])
+            ],
+        }
+
     def _unique_custom_specialty_value(self, label: str, value: str | None = None) -> str:
         base = re.sub(r"[^a-z0-9-]+", "-", (value or "").lower()).strip("-")
         if not base:
