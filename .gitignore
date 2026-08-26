@@ -1,19 +1,31 @@
-# Python
-backend/venv/
+# --- Python ---
 __pycache__/
-backend/*.pyc
 *.pyc
-backend/data/*.db
+backend/venv/
+.pytest_cache/
+backend/.tmp-pytest/
 
-# Node / Vite
-frontend/node_modules/
+# --- Данные приложения (SQLite, графы, загрузки) ---
+backend/data/
+
+# --- Артефакты ремонта/проверки БД ---
+backend/.repair_a/
+backend/data/.repair_b/
+backend/sqlite_write_probe.db
+backend/sqlite_write_probe.db-journal
+
+# --- Node / Vite ---
+node_modules/
 frontend/dist/
 
-# Logs
+# --- Логи и временные артефакты ---
 *.log
-*.err.log
+latest_logs/
+archived_logs/
+.artifacts/
 
-# Local/editor
+# --- Локальные настройки / редакторы ---
 .claude/
+.playwright-mcp/
 .DS_Store
 Thumbs.db
