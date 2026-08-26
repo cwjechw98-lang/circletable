@@ -1,0 +1,957 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Circletable Mascot Reforge Workbench</title>
+  <style>
+    :root {
+      --bg: #0a0f17;
+      --panel: #121927;
+      --panel-alt: #172133;
+      --line: #2f3f5d;
+      --text: #e7edf7;
+      --muted: #91a0bb;
+      --gold: #f5c96a;
+      --cyan: #6be7ff;
+      --green: #6dffb2;
+      --danger: #ff7b8e;
+      --shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+      --radius: 18px;
+      --pixel-font: "Press Start 2P", "Courier New", monospace;
+      --body-font: "Inter", "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at top left, rgba(107, 231, 255, 0.08), transparent 28%),
+        radial-gradient(circle at top right, rgba(245, 201, 106, 0.08), transparent 24%),
+        linear-gradient(180deg, #08101a 0%, #0d1420 100%);
+      color: var(--text);
+      font-family: var(--body-font);
+    }
+
+    .page {
+      max-width: 1620px;
+      margin: 0 auto;
+      padding: 28px 20px 60px;
+    }
+
+    .hero,
+    .usage,
+    .prompt-card,
+    .legend {
+      background: rgba(18, 25, 39, 0.92);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 24px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .eyebrow,
+    .section-kicker {
+      color: var(--cyan);
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    h1,
+    h2 {
+      margin: 0;
+      line-height: 1.15;
+    }
+
+    h1 {
+      font-size: clamp(28px, 4vw, 44px);
+    }
+
+    h2 {
+      font-size: 22px;
+      margin-bottom: 10px;
+    }
+
+    .hero p,
+    .usage li,
+    .legend li {
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 15px;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.3fr 1fr;
+      gap: 18px;
+    }
+
+    .usage,
+    .prompt-card,
+    .legend {
+      padding: 18px;
+    }
+
+    .usage ul,
+    .legend ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .usage code,
+    .prompt-card code,
+    .workbench-cell code {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 2px 6px;
+      color: var(--gold);
+      font-family: "JetBrains Mono", Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    .prompt-card {
+      margin-top: 20px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .prompt-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .prompt-actions button {
+      border: 1px solid var(--cyan);
+      background: rgba(107, 231, 255, 0.08);
+      color: var(--cyan);
+      border-radius: 999px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .prompt-actions span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    textarea.prompt-box {
+      min-height: 220px;
+      width: 100%;
+      resize: vertical;
+      padding: 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #0a1220;
+      color: var(--text);
+      font: 14px/1.6 "JetBrains Mono", Consolas, monospace;
+    }
+
+    .legend {
+      margin-top: 20px;
+    }
+
+    .board {
+      margin-top: 24px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .board-head,
+    .row {
+      display: grid;
+      grid-template-columns: 1.05fr 0.92fr 1.15fr;
+      gap: 14px;
+    }
+
+    .board-head {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      background: linear-gradient(180deg, rgba(8, 16, 26, 0.98), rgba(8, 16, 26, 0.92));
+      padding: 8px 0 12px;
+      backdrop-filter: blur(8px);
+    }
+
+    .board-head div {
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(18, 25, 39, 0.92);
+      font-family: var(--pixel-font);
+      color: var(--gold);
+      font-size: 11px;
+      line-height: 1.6;
+    }
+
+    .workbench-cell {
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(18, 25, 39, 0.94);
+      box-shadow: var(--shadow);
+      padding: 16px;
+      min-height: 250px;
+    }
+
+    .cell-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .cell-title strong {
+      font-size: 16px;
+      line-height: 1.25;
+    }
+
+    .cell-title span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .mascot-code {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 78px;
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--gold);
+      font-family: "JetBrains Mono", Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .anim-preview {
+      display: grid;
+      grid-template-columns: 84px 1fr;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .canvas-wrap,
+    .emoji-wrap,
+    .target-wrap {
+      width: 84px;
+      height: 84px;
+      border-radius: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(circle at top, rgba(255, 255, 255, 0.08), transparent 50%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .emoji-wrap {
+      font-size: 48px;
+    }
+
+    .target-wrap {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+      line-height: 1.5;
+      padding: 10px;
+      border-style: dashed;
+    }
+
+    canvas {
+      width: 64px;
+      height: 64px;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.35));
+    }
+
+    .anim-note,
+    .ref-note,
+    .target-note,
+    .target-hint {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .ref-tags {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 10px 0;
+    }
+
+    .ref-tag {
+      border-radius: 999px;
+      padding: 5px 8px;
+      border: 1px solid rgba(107, 231, 255, 0.22);
+      background: rgba(107, 231, 255, 0.08);
+      color: var(--cyan);
+      font-size: 12px;
+    }
+
+    .target-template {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 14px;
+      background: #0b1320;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #b8c7df;
+      font: 12px/1.55 "JetBrains Mono", Consolas, monospace;
+      white-space: pre-wrap;
+    }
+
+    .row.is-priority .workbench-cell {
+      border-color: rgba(245, 201, 106, 0.32);
+      box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(245, 201, 106, 0.18);
+    }
+
+    .row.is-priority .cell-title strong {
+      color: var(--gold);
+    }
+
+    @media (max-width: 1200px) {
+      .hero-grid,
+      .board-head,
+      .row {
+        grid-template-columns: 1fr;
+      }
+
+      .board-head {
+        position: static;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="eyebrow">Circletable / Mascot Reforge</div>
+      <h1>Workbench для перерисовки анимированных маскотов</h1>
+      <p>
+        Этот файл нужен как мост между текущими пиксельными персонажами в приложении, каноничными emoji-референсами
+        и будущими дорисованными версиями. Левая колонка показывает текущий анимированный образ из проекта, средняя —
+        статический канон и смысл персонажа, правая оставлена как слот, который внешняя модель должна заполнить новыми
+        кадрами, кодом или SVG.
+      </p>
+      <div class="hero-grid">
+        <section class="usage">
+          <div class="section-kicker">Где это правится в проекте</div>
+          <h2>Файлы-источники</h2>
+          <ul>
+            <li><code>frontend/src/components/mascotData.js</code> — список маскотов, emoji и переключатель <code>sprite/emoji</code> по каждому персонажу.</li>
+            <li><code>frontend/src/components/spriteData.js</code> — текущие пиксельные тела и face overlays. Именно здесь лежат реальные ASCII-спрайты.</li>
+            <li><code>frontend/src/components/PixelSprite.jsx</code> — рендер canvas-спрайта и fallback на статический emoji.</li>
+          </ul>
+        </section>
+        <section class="usage">
+          <div class="section-kicker">Режим работы</div>
+          <h2>Как использовать</h2>
+          <ul>
+            <li>Показывай внешней модели <strong>вторую колонку как канон</strong>, а <strong>первую как плохой текущий прототип</strong>.</li>
+            <li>Проси модель вписать результат прямо в <strong>третью колонку</strong> этого файла.</li>
+            <li>Самый удобный формат ответа для обратной интеграции — <code>16x16</code> строки или strip на прозрачном фоне.</li>
+            <li>Если какой-то маскот пока не готов, временно переведи его в <code>'emoji'</code> в <code>mascotData.js</code>.</li>
+          </ul>
+        </section>
+      </div>
+    </section>
+
+    <section class="prompt-card">
+      <div class="section-kicker">Master Prompt</div>
+      <h2>Промпт для внешней модели</h2>
+      <div class="prompt-actions">
+        <button type="button" id="copy-prompt">Скопировать промпт</button>
+        <span>Промпт просит модель заполнить третий столбец прямо в этом HTML.</span>
+      </div>
+      <textarea class="prompt-box" id="master-prompt" readonly></textarea>
+    </section>
+
+    <section class="legend">
+      <div class="section-kicker">Важные ограничения</div>
+      <h2>Что нужно сохранить</h2>
+      <ul>
+        <li>Прозрачный фон, читаемый силуэт и один общий якорь персонажа.</li>
+        <li>Направление взгляда и позу по возможности держать близко к текущему игровому персонажу.</li>
+        <li>Если текущий анимированный прототип не читается как существо, приоритет у статического emoji и описания во второй колонке.</li>
+        <li>Для возвращения в проект удобнее всего присылать либо <code>16x16</code> row arrays, либо короткий strip/atlas с подписью кадров.</li>
+      </ul>
+    </section>
+
+    <section class="board">
+      <div class="board-head">
+        <div>1. Текущий анимированный персонаж из проекта</div>
+        <div>2. Канонический статический референс</div>
+        <div>3. Слот для дорисованной версии от внешней модели</div>
+      </div>
+      <div id="rows"></div>
+    </section>
+  </main>
+
+  <script>
+    const PALETTES = {
+      owl: {
+        1: '#8855cc', 2: '#5a2d8a', 3: '#c7a0ff', 4: '#ffffff',
+        5: '#111111', 6: '#ff6688', 7: '#f0c040', 8: '#ff99aa',
+      },
+      robot: {
+        1: '#55cc77', 2: '#2a8a4a', 3: '#aaffcc', 4: '#ffffff',
+        5: '#111111', 6: '#ff3355', 7: '#00ccff', 8: '#ffcc00',
+      },
+      cat: {
+        1: '#5588ff', 2: '#3355aa', 3: '#aaccff', 4: '#ffffff',
+        5: '#111111', 6: '#ff6688', 7: '#ffcc44', 8: '#ff99aa',
+      },
+      llama: {
+        1: '#ff9944', 2: '#cc6622', 3: '#ffcc88', 4: '#ffffff',
+        5: '#111111', 6: '#cc4444', 7: '#ffeecc', 8: '#ff99aa',
+      },
+      dragon: {
+        1: '#ff4466', 2: '#aa2244', 3: '#ff8899', 4: '#ffffff',
+        5: '#111111', 6: '#ffaa33', 7: '#ffdd44', 8: '#ff6633',
+      },
+      wizard: {
+        1: '#6644cc', 2: '#4422aa', 3: '#9977ff', 4: '#ffffff',
+        5: '#111111', 6: '#ff6688', 7: '#f0c040', 8: '#00f0f0',
+      },
+      ghost: {
+        1: '#ccccdd', 2: '#9999aa', 3: '#eeeeff', 4: '#ffffff',
+        5: '#333355', 6: '#8888aa', 7: '#aaaacc', 8: '#dd99ff',
+      },
+      crystal: {
+        1: '#22ccaa', 2: '#118877', 3: '#66ffdd', 4: '#ffffff',
+        5: '#111111', 6: '#ff6688', 7: '#aaffee', 8: '#88ddcc',
+      },
+      fox: {
+        1: '#ee8833', 2: '#bb5511', 3: '#ffbb66', 4: '#ffffff',
+        5: '#111111', 6: '#cc3333', 7: '#ffeecc', 8: '#ff99aa',
+      },
+      panda: {
+        1: '#ddddee', 2: '#222233', 3: '#ffffff', 4: '#ffffff',
+        5: '#111111', 6: '#ff6677', 7: '#aaaabb', 8: '#ff99aa',
+      },
+    }
+
+    const BODIES = {
+      owl: [
+        '....222222....',
+        '...22222222...',
+        '..2211111122..',
+        '.221111111122.',
+        '.214411441112.',
+        '.215511551112.',
+        '.211177711112.',
+        '..2111111112..',
+        '..2211111122..',
+        '...2111111...',
+        '..21111111.2..',
+        '..2111111122..',
+        '...22222222...',
+        '....2...22....',
+        '...22...222...',
+        '................',
+      ],
+      robot: [
+        '.....7777.....',
+        '......77......',
+        '..2222222222..',
+        '..2111111112..',
+        '..2144114412..',
+        '..2155115512..',
+        '..2111661112..',
+        '..2222222222..',
+        '...211111112..',
+        '..8211111128..',
+        '..8211111128..',
+        '...211111112..',
+        '...222222222..',
+        '....22..22....',
+        '...222..222...',
+        '................',
+      ],
+      cat: [
+        '...22....22.....',
+        '..2212..2122....',
+        '..2112222212....',
+        '.221111111122...',
+        '.214411441112...',
+        '.215511551112...',
+        '.211116611112...',
+        '.211133331112...',
+        '..2111111112....',
+        '..2211111122....',
+        '...21111112.....',
+        '...22111122.....',
+        '..22211111222...',
+        '...22..111122...',
+        '....22....22....',
+        '................',
+      ],
+      llama: [
+        '...33..........',
+        '..3113.........',
+        '..2112.........',
+        '..214412.......',
+        '..215512.......',
+        '..211162.......',
+        '..211112.......',
+        '..221112.......',
+        '...21113311...',
+        '...211111112..',
+        '..2111111112..',
+        '..2111111112..',
+        '..2222222222..',
+        '...22....22...',
+        '..222....222..',
+        '................',
+      ],
+      dragon: [
+        '..7..222..7...',
+        '..7.21112.7...',
+        '...21111112...',
+        '..2114411412..',
+        '..2115511512..',
+        '..2111661112..',
+        '..2211111122..',
+        '8..211111128..',
+        '88.211111128..',
+        '8..211111112..',
+        '...211111112..',
+        '...221111122..',
+        '....2222222...',
+        '.....22.22.77.',
+        '....222.222.7.',
+        '................',
+      ],
+      wizard: [
+        '.....7772.....',
+        '....77772.....',
+        '...777772.....',
+        '..27777722....',
+        '..28888882....',
+        '.2211111122...',
+        '.2144114412...',
+        '.2155115512...',
+        '.2111661112...',
+        '..211111112...',
+        '..231111132...',
+        '..211111112...',
+        '..222222222...',
+        '...22....22...',
+        '..222....222..',
+        '................',
+      ],
+      ghost: [
+        '....22222.....',
+        '...2111112....',
+        '..211111112...',
+        '..214411441...',
+        '..215511551...',
+        '..211111112...',
+        '..211166112...',
+        '..211111112...',
+        '..211111112...',
+        '..211111112...',
+        '..211111112...',
+        '..211111112...',
+        '.21.21.21.12..',
+        '.2..2..2..2...',
+        '................',
+        '................',
+      ],
+      crystal: [
+        '.......2......',
+        '......212.....',
+        '.....21312....',
+        '....2131312...',
+        '...213131312..',
+        '..21311131312.',
+        '.2144113114412',
+        '.2155113115512',
+        '..21311131312.',
+        '...213131312..',
+        '....2131312...',
+        '.....21612....',
+        '......212.....',
+        '.......2......',
+        '................',
+        '................',
+      ],
+      fox: [
+        '..2..........2.',
+        '.212........212',
+        '.2132......2312',
+        '..213222223112.',
+        '..2114411441..',
+        '..2115511551..',
+        '..2111766111..',
+        '..21173.371..',
+        '...211111112..',
+        '....2111112...',
+        '.....21112....',
+        '..33.21112....',
+        '.3113.212.....',
+        '.3773.222.....',
+        '..33..222.....',
+        '................',
+      ],
+      panda: [
+        '...222...222..',
+        '..22522.22522.',
+        '..2222222222..',
+        '.2211111111122',
+        '.2254411445212',
+        '.2255511555212',
+        '.2211111111122',
+        '..2111661112..',
+        '..2111111112..',
+        '..2211111122..',
+        '...211111112..',
+        '...222222222..',
+        '....22...22...',
+        '...222...222..',
+        '................',
+        '................',
+      ],
+    }
+
+    const ALIASES = {
+      wolf: 'fox',
+      tiger: 'cat',
+      frog: 'robot',
+      octopus: 'crystal',
+      alien: 'ghost',
+      bat: 'dragon',
+      bee: 'owl',
+      eagle: 'owl',
+      unicorn: 'llama',
+      raccoon: 'panda',
+    }
+
+    const MASCOTS = [
+      {
+        key: 'owl',
+        emoji: '🦉',
+        label: 'Сова',
+        logic: 'мудрый стратег, читается как сова-наблюдатель',
+        cues: ['большие глаза', 'клюв', 'ушки/пучки перьев', 'компактное круглое тело'],
+      },
+      {
+        key: 'robot',
+        emoji: '🤖',
+        label: 'Робот',
+        logic: 'системный технарь, механический помощник',
+        cues: ['антенна', 'экранное лицо', 'коробчатая голова', 'роботические руки и ноги'],
+      },
+      {
+        key: 'cat',
+        emoji: '🐱',
+        label: 'Кот',
+        logic: 'острый, живой, ехидный персонаж; именно кот, а не абстрактный зверёк',
+        cues: ['треугольные уши', 'морда кота', 'усы', 'хвост', 'кошачьи лапы'],
+      },
+      {
+        key: 'llama',
+        emoji: '🦙',
+        label: 'Лама',
+        logic: 'ламообразный персонаж с длинной шеей и вытянутой головой',
+        cues: ['длинная шея', 'длинная морда', 'торчащие уши', 'стройные ноги'],
+      },
+      {
+        key: 'dragon',
+        emoji: '🐲',
+        label: 'Дракон',
+        logic: 'мультяшный дракон, не демон и не просто рогатый монстр',
+        cues: ['рога', 'драконья морда', 'крылья', 'хвост', 'рептильный силуэт'],
+      },
+      {
+        key: 'wizard',
+        emoji: '🧙',
+        label: 'Маг',
+        logic: 'именно волшебник, читаемый с первого взгляда',
+        cues: ['острая шляпа', 'мантия', 'магический акцент', 'не путать с монстром'],
+      },
+      {
+        key: 'ghost',
+        emoji: '👻',
+        label: 'Призрак',
+        logic: 'летающий призрак с мягкой формой и волнистым низом',
+        cues: ['парящий силуэт', 'волнистый низ', 'нежёсткие контуры', 'простое лицо'],
+      },
+      {
+        key: 'crystal',
+        emoji: '💎',
+        label: 'Кристалл',
+        logic: 'живой огранённый камень, а не blob с лицом',
+        cues: ['геометричные грани', 'острый верх', 'огранка', 'световые блики'],
+      },
+      {
+        key: 'fox',
+        emoji: '🦊',
+        label: 'Лис',
+        logic: 'хитрый лис с крупным хвостом и острой мордой',
+        cues: ['острая морда', 'большой пушистый хвост', 'ушки', 'лисий силуэт'],
+      },
+      {
+        key: 'panda',
+        emoji: '🐼',
+        label: 'Панда',
+        logic: 'панда с характерными тёмными пятнами вокруг глаз',
+        cues: ['чёрные ушки', 'маска вокруг глаз', 'бело-чёрный контраст', 'мягкий силуэт'],
+      },
+      {
+        key: 'wolf',
+        emoji: '🐺',
+        label: 'Волк',
+        logic: 'волк, более хищный и жёсткий, чем лис',
+        cues: ['острые уши', 'более длинная морда', 'серый мех', 'волчий характер'],
+      },
+      {
+        key: 'tiger',
+        emoji: '🐯',
+        label: 'Тигр',
+        logic: 'кот-родственник, но именно тигр, со считываемыми полосами',
+        cues: ['крупная кошачья морда', 'полосы', 'оранжево-чёрная схема', 'хищная улыбка'],
+      },
+      {
+        key: 'frog',
+        emoji: '🐸',
+        label: 'Лягушка',
+        logic: 'приземистая лягушка с большими глазами',
+        cues: ['широкий рот', 'выпуклые глаза', 'низкий корпус', 'амфибийный силуэт'],
+      },
+      {
+        key: 'octopus',
+        emoji: '🐙',
+        label: 'Осьминог',
+        logic: 'осьминог с читаемыми щупальцами, а не кристалл',
+        cues: ['щупальца', 'круглая голова', 'морской характер', 'мягкая пластика'],
+      },
+      {
+        key: 'alien',
+        emoji: '👽',
+        label: 'Пришелец',
+        logic: 'классический инопланетянин с большой головой и глазами',
+        cues: ['увеличенная голова', 'миндалевидные глаза', 'тонкое тело', 'не призрак'],
+      },
+      {
+        key: 'bat',
+        emoji: '🦇',
+        label: 'Летучая мышь',
+        logic: 'маленький ночной зверёк с крыльями, не дракон',
+        cues: ['крылья-летучки', 'ушки', 'маленькое тело', 'мышиный силуэт'],
+      },
+      {
+        key: 'bee',
+        emoji: '🐝',
+        label: 'Пчела',
+        logic: 'пчела с полосками и крыльями, а не сова',
+        cues: ['полосы на теле', 'крылышки', 'жало', 'компактная насекомая форма'],
+      },
+      {
+        key: 'eagle',
+        emoji: '🦅',
+        label: 'Орёл',
+        logic: 'хищная птица с крупным клювом',
+        cues: ['изогнутый клюв', 'птичий профиль', 'хищный взгляд', 'крылатый силуэт'],
+      },
+      {
+        key: 'unicorn',
+        emoji: '🦄',
+        label: 'Единорог',
+        logic: 'лошадеподобный персонаж с рогом, а не просто лама',
+        cues: ['рог', 'лошадиная морда', 'грива', 'сказочный силуэт'],
+      },
+      {
+        key: 'raccoon',
+        emoji: '🦝',
+        label: 'Енот',
+        logic: 'енот с маской на морде и характерным хвостом',
+        cues: ['маска вокруг глаз', 'кольчатый хвост', 'короткая морда', 'ловкие лапы'],
+      },
+    ]
+
+    const MASTER_PROMPT = `Тебе дан HTML-workbench для игровых маскотов проекта Circletable.
+
+ЗАДАЧА:
+1. Для каждой строки сохрани первую колонку как текущий проблемный анимированный прототип.
+2. Считай вторую колонку каноническим референсом существа.
+3. Третью колонку нужно заполнить улучшенной версией персонажа так, чтобы он был похож именно на статический emoji-референс, даже если текущий пиксельный персонаж в первой колонке на него не похож.
+
+ЧТО НУЖНО СДЕЛАТЬ:
+- Не удаляй существующие данные.
+- Для каждой строки в третьей колонке добавь новый вариант игрового анимированного персонажа.
+- Лучше всего вернуть результат в одном из двух форматов:
+  A) 16x16 row arrays в духе spriteData.js
+  B) прозрачный sprite strip / atlas с понятной подписью кадров
+- Если выдаёшь row arrays, оставь их внутри тега <pre class="target-template"> этой строки.
+- Если выдаёшь strip/SVG, вставь его прямо в третью колонку и кратко подпиши, как извлечь кадры.
+
+ОБЯЗАТЕЛЬНЫЕ ИНВАРИАНТЫ:
+- прозрачный фон
+- тот же масштаб порядка chibi/pixel mascot
+- единый anchor персонажа
+- одна и та же сущность на всех кадрах
+- readable silhouette at small size
+- одинаковое направление лица и общий объём персонажа
+
+ПРИОРИТЕТ:
+- если текущий анимированный прототип в первой колонке конфликтует со статическим emoji и текстовым описанием из второй колонки, ПРИОРИТЕТ У ВТОРОЙ КОЛОНКИ
+
+ТИП АНИМАЦИИ:
+- idle / breathing loop
+- 4 кадра достаточно
+- без фона, без сцен, без лишнего UI
+
+ЦЕЛЬ:
+- получить персонажей, которые можно потом вручную адаптировать обратно в frontend/src/components/spriteData.js проекта Circletable.`
+
+    const GRID = 16
+    const SCALE = 4
+    const SIZE = GRID * SCALE
+    const FRAMES = [[0, 0], [0, -1], [0, 0], [0, 1]]
+
+    function resolveBaseKey(key) {
+      return ALIASES[key] || key
+    }
+
+    function drawSprite(canvas, mascotKey, frameOffset) {
+      const baseKey = resolveBaseKey(mascotKey)
+      const body = BODIES[baseKey]
+      const palette = PALETTES[baseKey]
+      const ctx = canvas.getContext('2d')
+      ctx.clearRect(0, 0, SIZE, SIZE)
+      ctx.imageSmoothingEnabled = false
+
+      const [dx, dy] = frameOffset
+      for (let row = 0; row < GRID; row++) {
+        const line = body[row] || ''
+        for (let col = 0; col < GRID; col++) {
+          const code = line[col]
+          if (!code || code === '.') continue
+          const color = palette[code]
+          if (!color) continue
+          ctx.fillStyle = color
+          const px = Math.round((col + dx * 0.45) * SCALE)
+          const py = Math.round((row + dy * 0.45) * SCALE)
+          ctx.fillRect(px, py, SCALE, SCALE)
+        }
+      }
+    }
+
+    function buildRow(mascot) {
+      const row = document.createElement('div')
+      row.className = `row${mascot.key === 'cat' ? ' is-priority' : ''}`
+
+      row.innerHTML = `
+        <article class="workbench-cell">
+          <div class="cell-title">
+            <strong>${mascot.label}</strong>
+            <span class="mascot-code">${mascot.key}</span>
+          </div>
+          <div class="anim-preview">
+            <div class="canvas-wrap">
+              <canvas width="${SIZE}" height="${SIZE}" data-mascot="${mascot.key}"></canvas>
+            </div>
+            <div>
+              <div class="anim-note"><strong>Текущее in-app чтение:</strong> ${mascot.logic}.</div>
+              <div class="anim-note">Этот рендер показывает текущую нейтральную пиксельную форму из проекта. Для aliased маскотов это именно тот базовый силуэт, который сейчас используется в приложении.</div>
+            </div>
+          </div>
+        </article>
+        <article class="workbench-cell">
+          <div class="cell-title">
+            <strong>${mascot.emoji} ${mascot.label}</strong>
+            <span>канон</span>
+          </div>
+          <div class="anim-preview">
+            <div class="emoji-wrap">${mascot.emoji}</div>
+            <div>
+              <div class="ref-note"><strong>Смысл:</strong> ${mascot.logic}.</div>
+              <div class="ref-tags">
+                ${mascot.cues.map((cue) => `<span class="ref-tag">${cue}</span>`).join('')}
+              </div>
+              <div class="ref-note">Если текущий прототип спорит с этой колонкой, приоритет у этой колонки.</div>
+            </div>
+          </div>
+        </article>
+        <article class="workbench-cell">
+          <div class="cell-title">
+            <strong>AI output slot</strong>
+            <span>сюда внешняя модель вставляет новый вариант</span>
+          </div>
+          <div class="anim-preview">
+            <div class="target-wrap">пустой слот<br>под новый спрайт</div>
+            <div>
+              <div class="target-note"><strong>Ожидаемый результат:</strong> улучшенный animated mascot, похожий на ${mascot.emoji} ${mascot.label}.</div>
+              <div class="target-hint">Можно вставлять strip, SVG, JSON с кадрами или row arrays под формат <code>spriteData.js</code>.</div>
+            </div>
+          </div>
+          <pre class="target-template">// ${mascot.key}
+// AI may replace this block with:
+// 1) 16x16 row arrays
+// 2) sprite strip metadata
+// 3) inline SVG frames
+//
+// Must read clearly as: ${mascot.emoji} ${mascot.label}
+// Critical cues: ${mascot.cues.join(', ')}</pre>
+        </article>
+      `
+
+      return row
+    }
+
+    function animateAll() {
+      const canvases = [...document.querySelectorAll('canvas[data-mascot]')]
+      let frame = 0
+
+      function tick() {
+        const offset = FRAMES[frame % FRAMES.length]
+        canvases.forEach((canvas) => drawSprite(canvas, canvas.dataset.mascot, offset))
+        frame += 1
+        window.setTimeout(() => requestAnimationFrame(tick), 220)
+      }
+
+      tick()
+    }
+
+    function initPrompt() {
+      const promptBox = document.getElementById('master-prompt')
+      promptBox.value = MASTER_PROMPT
+      document.getElementById('copy-prompt').addEventListener('click', async () => {
+        await navigator.clipboard.writeText(promptBox.value)
+        const button = document.getElementById('copy-prompt')
+        const original = button.textContent
+        button.textContent = 'Скопировано'
+        window.setTimeout(() => {
+          button.textContent = original
+        }, 1200)
+      })
+    }
+
+    function initRows() {
+      const root = document.getElementById('rows')
+      MASCOTS.forEach((mascot) => {
+        root.appendChild(buildRow(mascot))
+      })
+    }
+
+    initPrompt()
+    initRows()
+    animateAll()
+  </script>
+</body>
+</html>
