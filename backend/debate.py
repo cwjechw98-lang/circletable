@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import random
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from agents import Agent, AgentConfig, detect_emotion
 from chronomancer import Chronomancer
+from knowledge.lightrag_adapter import (
+    PROFILE_GRAPH_ROOT,
+    create_profile_graph,
+    insert_text,
+    query_graph,
+)
+from meta_memory import format_insight_recall, select_relevant_session_insights, store_session_memories
 from storage import Repository, utc_now
 
 
@@ -19,6 +28,24 @@ class RoundState:
     round_number: int
     order: list[dict]
     next_index: int = 0
+
+
+@dataclass
+class PreparedTurn:
+    room_id: str
+    session_id: str
+    round_id: str
+    round_number: int
+    participant: dict
+    participant_id: str
+    order_index: int
+    context_base: dict
+    prepared_rag_context: str
+    prepared_memory_context: str
+    snapshot_signature: str
+    history_anchor_id: str | None
+    prepared_at: float
+    status: str = "ready"
 
 
 class DebateEngine:
@@ -37,38 +64,357 @@ class DebateEngine:
         self._pause_requested = False
         self._stop_requested = False
         self._round_state: RoundState | None = None
+        self._round_rag_cache: dict[str, str] = {}
+        self._rag_cache_round_id: str | None = None
+        self._prepared_turns: dict[tuple[str, int], PreparedTurn] = {}
+        self._prep_tasks: dict[tuple[str, int], asyncio.Task] = {}
+        self._last_turn_committed_at: float | None = None
+        self._round_started_at: float | None = None
 
     def _density_profile(self, room_id: str | None) -> dict[str, float]:
         snapshot = self.repo.get_room_snapshot(room_id) if room_id else None
         density = (snapshot or {}).get("room", {}).get("densityMode") or "normal"
         if density == "calm":
             return {
-                "countdown": 3.8,
-                "pre_turn_min": 0.55,
-                "pre_turn_max": 1.05,
-                "pre_generation_min": 1.0,
-                "pre_generation_max": 1.65,
-                "between_turn_min": 0.75,
-                "between_turn_max": 1.2,
+                "countdown": 3.0,
+                "pre_turn_min": 0.35,
+                "pre_turn_max": 0.75,
+                "pre_generation_min": 0.55,
+                "pre_generation_max": 1.0,
+                "between_turn_min": 0.35,
+                "between_turn_max": 0.75,
             }
         if density == "stage":
             return {
-                "countdown": 2.2,
-                "pre_turn_min": 0.22,
-                "pre_turn_max": 0.55,
-                "pre_generation_min": 0.45,
-                "pre_generation_max": 0.9,
-                "between_turn_min": 0.25,
-                "between_turn_max": 0.55,
+                "countdown": 1.4,
+                "pre_turn_min": 0.08,
+                "pre_turn_max": 0.22,
+                "pre_generation_min": 0.12,
+                "pre_generation_max": 0.35,
+                "between_turn_min": 0.08,
+                "between_turn_max": 0.2,
             }
         return {
-            "countdown": 3.0,
-            "pre_turn_min": 0.35,
-            "pre_turn_max": 0.85,
-            "pre_generation_min": 0.8,
-            "pre_generation_max": 1.4,
-            "between_turn_min": 0.5,
-            "between_turn_max": 0.9,
+            "countdown": 2.2,
+            "pre_turn_min": 0.15,
+            "pre_turn_max": 0.4,
+            "pre_generation_min": 0.25,
+            "pre_generation_max": 0.65,
+            "between_turn_min": 0.18,
+            "between_turn_max": 0.4,
+        }
+
+    def _make_prep_key(self, round_id: str, order_index: int) -> tuple[str, int]:
+        return (round_id, order_index)
+
+    def _clear_prepared_turns(self, round_id: str | None = None):
+        keys = [
+            key
+            for key in set(self._prepared_turns) | set(self._prep_tasks)
+            if round_id is None or key[0] == round_id
+        ]
+        for key in keys:
+            task = self._prep_tasks.pop(key, None)
+            if task and not task.done():
+                task.cancel()
+        for key in keys:
+            self._prepared_turns.pop(key, None)
+
+    def _reset_turn_timing(self):
+        self._last_turn_committed_at = None
+        self._round_started_at = None
+
+    def _current_inter_turn_gap(self, now: float) -> float | None:
+        anchor = self._last_turn_committed_at
+        if anchor is None:
+            anchor = self._round_started_at
+        if anchor is None:
+            return None
+        return max(0.0, now - anchor)
+
+    def _last_committed_message_id(self, session_id: str) -> str | None:
+        latest = self.repo.list_session_messages(session_id, limit=1)
+        if not latest:
+            return None
+        return latest[-1].get("id")
+
+    def _truncate_context_text(self, text: str, limit: int) -> str:
+        value = (text or "").strip()
+        if len(value) <= limit:
+            return value
+        clipped = value[:limit].rstrip()
+        sentence_end = max(clipped.rfind("."), clipped.rfind("!"), clipped.rfind("?"))
+        if sentence_end >= int(limit * 0.6):
+            return clipped[:sentence_end + 1].rstrip()
+        line_break = clipped.rfind("\n")
+        if line_break >= int(limit * 0.6):
+            return clipped[:line_break].rstrip()
+        whitespace = clipped.rfind(" ")
+        if whitespace >= int(limit * 0.6):
+            return clipped[:whitespace].rstrip()
+        return clipped
+
+    def _build_agent_history(self, session_id: str) -> list[dict]:
+        messages = self.repo.list_session_messages(session_id, limit=48)
+        history = []
+        for message in messages:
+            author_type = message.get("author_type")
+            if author_type not in {"agent", "user", "system_event"}:
+                continue
+            history.append({
+                "type": message.get("type"),
+                "author_type": author_type,
+                "agent_name": message.get("agent_name") or message.get("name"),
+                "role": message.get("role", "participant"),
+                "specialty": message.get("specialty", "generalist"),
+                "specialtyLabel": message.get("specialtyLabel"),
+                "content": message.get("content", ""),
+            })
+        return history
+
+    def _build_agent_context_base(
+        self,
+        room_id: str,
+        session_id: str,
+        round_id: str,
+        round_number: int,
+        participant: dict | None = None,
+    ) -> dict:
+        snapshot = self.repo.get_room_snapshot(room_id)
+        session = self.repo.get_session(session_id)
+        room = (snapshot or {}).get("room", {})
+        return {
+            "topic": session["topic"] if session else "",
+            "graph_id": room.get("graphId"),
+            "internet_mode": room.get("internetMode") or (room.get("settings") or {}).get("internet_mode") or "auto",
+            "memory_graph_id": (
+                participant.get("memoryGraphId")
+                if participant
+                else None
+            ) or (
+                self.repo.get_profile_memory_graph_id(participant["profileId"])
+                if participant and participant.get("profileId")
+                else None
+            ),
+            "round_id": round_id,
+            "room_name": room.get("name", ""),
+            "room_summary": room.get("summary", ""),
+            "session_chronicle": session["chronicle"] if session else "",
+            "observer_provider": (session or {}).get("observerProvider") or room.get("observerProvider"),
+            "observer_model": (session or {}).get("observerModel") or room.get("observerModel"),
+            "density_mode": room.get("densityMode", "normal"),
+            "tools": room.get("settings", {}),
+            "wrap_signal": bool(session and session["wrapRequested"]),
+            "final_signal": bool(session and session["finalRoundPlanned"]),
+            "round_number": round_number,
+            "active_participants": (snapshot or {}).get("participants", {}).get("active", []),
+            "pinned_highlights": (snapshot or {}).get("pinnedMessages", []),
+        }
+
+    def _build_profile_memory_query(self, participant: dict, ctx: dict) -> str:
+        topic = (ctx.get("topic") or "").strip()
+        active_names = [
+            item.get("name")
+            for item in ctx.get("active_participants", [])
+            if item.get("name") and item.get("name") != participant.get("name")
+        ][:5]
+        recent = " ".join(
+            (message.get("content") or "").strip()[:160]
+            for message in ctx.get("history", [])[-3:]
+            if (message.get("content") or "").strip()
+        )
+        base = f"Моё мнение: {topic}" if topic else ""
+        social = f"Совместные обсуждения с: {', '.join(active_names)}" if active_names else ""
+        observer = ""
+        if ctx.get("observer_provider") and ctx.get("observer_model"):
+            observer = f"Наблюдатель: {ctx['observer_provider']}/{ctx['observer_model']}"
+        return ". ".join(part for part in [base, social, observer, recent] if part).strip()
+
+    async def _get_profile_memory_context(self, participant: dict, ctx: dict) -> str:
+        memory_graph_id = ctx.get("memory_graph_id")
+        if not memory_graph_id:
+            return ""
+        try:
+            memory_query = self._build_profile_memory_query(participant, ctx)
+            if not memory_query:
+                return ""
+            memory_context = await asyncio.to_thread(
+                query_graph,
+                memory_graph_id,
+                memory_query,
+                "hybrid",
+                10,
+                root_dir=PROFILE_GRAPH_ROOT,
+            )
+        except Exception:
+            return ""
+        return self._truncate_context_text(memory_context or "", limit=4000)
+
+    def _make_turn_snapshot_signature(
+        self,
+        room_id: str,
+        session_id: str,
+        round_id: str,
+        round_number: int,
+        participant_id: str,
+    ) -> str:
+        snapshot = self.repo.get_room_snapshot(room_id) or {}
+        room = snapshot.get("room") or {}
+        session = self.repo.get_session(session_id) or {}
+        active = snapshot.get("participants", {}).get("active", [])
+        signature_payload = {
+            "room_id": room_id,
+            "session_id": session_id,
+            "round_id": round_id,
+            "round_number": round_number,
+            "participant_id": participant_id,
+            "topic": session.get("topic", ""),
+            "wrap": bool(session.get("wrapRequested")),
+            "final": bool(session.get("finalRoundPlanned")),
+            "graph_id": room.get("graphId"),
+            "internet_mode": room.get("internetMode") or (room.get("settings") or {}).get("internet_mode") or "auto",
+            "density_mode": room.get("densityMode", "normal"),
+            "observer_provider": session.get("observerProvider") or room.get("observerProvider"),
+            "observer_model": session.get("observerModel") or room.get("observerModel"),
+            "active_participants": [
+                {
+                    "id": item.get("id"),
+                    "profileId": item.get("profileId"),
+                    "role": item.get("role"),
+                    "specialty": item.get("specialty"),
+                    "provider": item.get("provider"),
+                    "model": item.get("model"),
+                }
+                for item in active
+            ],
+        }
+        encoded = json.dumps(signature_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        return hashlib.sha1(encoded).hexdigest()
+
+    async def _prepare_turn(
+        self,
+        room_id: str,
+        session_id: str,
+        round_state: RoundState,
+        order_index: int,
+        participant: dict,
+    ) -> PreparedTurn:
+        participant_snapshot = dict(participant)
+        context_base = self._build_agent_context_base(
+            room_id,
+            session_id,
+            round_state.round_id,
+            round_state.round_number,
+            participant=participant_snapshot,
+        )
+        history = self._build_agent_history(session_id)
+        prep_context = {**context_base, "history": history}
+        rag_task = asyncio.create_task(self._get_round_rag_context(round_state.round_id, prep_context))
+        memory_task = asyncio.create_task(self._get_profile_memory_context(participant_snapshot, prep_context))
+        prepared_rag_context, prepared_memory_context = await asyncio.gather(rag_task, memory_task)
+        return PreparedTurn(
+            room_id=room_id,
+            session_id=session_id,
+            round_id=round_state.round_id,
+            round_number=round_state.round_number,
+            participant=participant_snapshot,
+            participant_id=participant_snapshot["id"],
+            order_index=order_index,
+            context_base=context_base,
+            prepared_rag_context=prepared_rag_context or "",
+            prepared_memory_context=prepared_memory_context or "",
+            snapshot_signature=self._make_turn_snapshot_signature(
+                room_id,
+                session_id,
+                round_state.round_id,
+                round_state.round_number,
+                participant_snapshot["id"],
+            ),
+            history_anchor_id=self._last_committed_message_id(session_id),
+            prepared_at=asyncio.get_running_loop().time(),
+        )
+
+    def _is_prepared_turn_valid(self, prepared: PreparedTurn, round_state: RoundState | None) -> bool:
+        if self._stop_requested or self._pause_requested:
+            return False
+        if not round_state:
+            return False
+        if round_state.round_id != prepared.round_id or round_state.round_number != prepared.round_number:
+            return False
+        if prepared.order_index >= len(round_state.order):
+            return False
+        participant = round_state.order[prepared.order_index]
+        if participant["id"] != prepared.participant_id:
+            return False
+        current_signature = self._make_turn_snapshot_signature(
+            prepared.room_id,
+            prepared.session_id,
+            prepared.round_id,
+            prepared.round_number,
+            prepared.participant_id,
+        )
+        return current_signature == prepared.snapshot_signature
+
+    async def _prepare_turn_task(
+        self,
+        room_id: str,
+        session_id: str,
+        round_state: RoundState,
+        order_index: int,
+        participant: dict,
+    ):
+        key = self._make_prep_key(round_state.round_id, order_index)
+        try:
+            prepared = await self._prepare_turn(room_id, session_id, round_state, order_index, participant)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
+        finally:
+            self._prep_tasks.pop(key, None)
+        if self._is_prepared_turn_valid(prepared, self._round_state):
+            self._prepared_turns[key] = prepared
+
+    def _seed_prepared_turn(self, room_id: str, session_id: str, round_state: RoundState | None, order_index: int):
+        if not round_state or order_index >= len(round_state.order):
+            return
+        key = self._make_prep_key(round_state.round_id, order_index)
+        if key in self._prepared_turns or key in self._prep_tasks:
+            return
+        participant = round_state.order[order_index]
+        self._prep_tasks[key] = asyncio.create_task(
+            self._prepare_turn_task(room_id, session_id, round_state, order_index, participant)
+        )
+
+    async def _ensure_prepared_turn(
+        self,
+        room_id: str,
+        session_id: str,
+        round_state: RoundState,
+        order_index: int,
+    ) -> PreparedTurn:
+        key = self._make_prep_key(round_state.round_id, order_index)
+        task = self._prep_tasks.get(key)
+        if task:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        prepared = self._prepared_turns.get(key)
+        if prepared and self._is_prepared_turn_valid(prepared, round_state):
+            return prepared
+        self._prepared_turns.pop(key, None)
+        participant = round_state.order[order_index]
+        prepared = await self._prepare_turn(room_id, session_id, round_state, order_index, participant)
+        self._prepared_turns[key] = prepared
+        return prepared
+
+    def _compose_prepared_context(self, prepared: PreparedTurn) -> dict:
+        return {
+            **prepared.context_base,
+            "history": self._build_agent_history(prepared.session_id),
+            "rag_context": prepared.prepared_rag_context,
+            "memory_context": prepared.prepared_memory_context,
         }
 
     @property
@@ -283,6 +629,7 @@ class DebateEngine:
         self._task = asyncio.create_task(self._loop(target_room_id, session["id"]))
 
     async def stop_session(self):
+        session = None
         self._stop_requested = True
         self._pause_requested = False
         self._resume_event.set()
@@ -519,11 +866,16 @@ class DebateEngine:
                     order = active[:]
                     random.shuffle(order)
                     self._round_state = RoundState(round_id=round_id, round_number=round_number, order=order)
+                    self._clear_round_rag_cache(round_id)
                     density = self._density_profile(room_id)
                     countdown = density["countdown"]
                     await self._broadcast({"type": "countdown", "round": round_number, "seconds": round(countdown)})
-                    await asyncio.sleep(countdown + 0.1)
+                    await asyncio.sleep(countdown)
                     await self._broadcast({"type": "round_start", "round": round_number})
+                    await self._inject_planned_events(room_id, session_id, round_id, round_number)
+                    self._last_turn_committed_at = None
+                    self._round_started_at = asyncio.get_running_loop().time()
+                    self._seed_prepared_turn(room_id, session_id, self._round_state, 0)
 
                 while self._round_state and self._round_state.next_index < len(self._round_state.order):
                     if self._pause_requested:
@@ -531,8 +883,16 @@ class DebateEngine:
                         if self._stop_requested:
                             break
 
-                    participant = self._round_state.order[self._round_state.next_index]
-                    await self._agent_turn(room_id, session_id, self._round_state.round_id, self._round_state.round_number, participant)
+                    current_index = self._round_state.next_index
+                    prepared = await self._ensure_prepared_turn(
+                        room_id,
+                        session_id,
+                        self._round_state,
+                        current_index,
+                    )
+                    self._prepared_turns.pop(self._make_prep_key(prepared.round_id, prepared.order_index), None)
+                    self._seed_prepared_turn(room_id, session_id, self._round_state, current_index + 1)
+                    await self._execute_prepared_turn(prepared)
                     self._round_state.next_index += 1
 
                     if self._stop_requested:
@@ -550,6 +910,8 @@ class DebateEngine:
 
                 review = await self._review_round(room_id, session_id, self._round_state)
                 self._round_state = None
+                self._clear_prepared_turns()
+                self._reset_turn_timing()
 
                 if review["recommendation"] == "complete":
                     await self._complete_session("completed", review)
@@ -575,46 +937,67 @@ class DebateEngine:
             self._stop_requested = False
             self._resume_event.set()
             self._round_state = None
+            self._clear_prepared_turns()
+            self._reset_turn_timing()
             await self._broadcast_session_state(final_session)
 
     async def _enter_paused(self):
         if not self._running_session_id:
             return
+        self._clear_prepared_turns()
+        self._reset_turn_timing()
         self._state = "paused"
         self.repo.update_session(self._running_session_id, {"status": "paused"})
         self._resume_event.clear()
         await self._broadcast({"type": "paused"})
         await self._broadcast_session_state()
         await self._resume_event.wait()
+        if self._round_state and not self._stop_requested:
+            self._round_started_at = asyncio.get_running_loop().time()
 
-    async def _agent_turn(self, room_id: str, session_id: str, round_id: str, round_number: int, participant: dict):
-        density = self._density_profile(room_id)
+    async def _execute_prepared_turn(self, prepared: PreparedTurn):
+        loop = asyncio.get_running_loop()
+        density = self._density_profile(prepared.room_id)
         await asyncio.sleep(random.uniform(density["pre_turn_min"], density["pre_turn_max"]))
         if self._stop_requested:
             return
 
+        thinking_started_at = loop.time()
+        inter_turn_gap_seconds = self._current_inter_turn_gap(thinking_started_at)
         await self._broadcast({
             "type": "agent_thinking",
-            "agent_id": participant["id"],
+            "agent_id": prepared.participant_id,
         })
 
         await asyncio.sleep(random.uniform(density["pre_generation_min"], density["pre_generation_max"]))
         if self._stop_requested:
             return
 
+        if not self._is_prepared_turn_valid(prepared, self._round_state):
+            refreshed = await self._ensure_prepared_turn(
+                prepared.room_id,
+                prepared.session_id,
+                self._round_state,
+                prepared.order_index,
+            )
+            self._prepared_turns.pop(self._make_prep_key(refreshed.round_id, refreshed.order_index), None)
+            prepared = refreshed
+
+        participant = prepared.participant
         agent = Agent(AgentConfig(
             id=participant["id"],
             profile_id=participant["profileId"],
             name=participant["name"],
             role=participant["role"],
             specialty=participant["specialty"],
+            specialty_label=participant.get("specialtyLabel") or "",
             provider=participant["provider"],
             model=participant["model"],
             emoji=participant["emoji"],
             mascot=participant["mascot"],
         ))
 
-        context = self._build_agent_context(room_id, session_id, round_number)
+        context = self._compose_prepared_context(prepared)
         accumulated = ""
 
         async def on_token(token: str):
@@ -622,23 +1005,43 @@ class DebateEngine:
             accumulated += token
             await self._broadcast({
                 "type": "agent_token",
-                "agent_id": participant["id"],
+                "agent_id": prepared.participant_id,
                 "token": token,
             })
 
+        response_started_at = loop.time()
         try:
             await agent.generate(context, on_token=on_token)
         except Exception as exc:
             await self._broadcast({
                 "type": "error",
-                "agent_id": participant["id"],
+                "agent_id": prepared.participant_id,
                 "message": str(exc),
             })
             return
 
         if not accumulated.strip():
             accumulated = "(без ответа)"
+        response_seconds = max(0.1, loop.time() - response_started_at)
+        await self._commit_turn_result(
+            prepared,
+            agent,
+            context,
+            accumulated,
+            response_seconds,
+            inter_turn_gap_seconds,
+        )
 
+    async def _commit_turn_result(
+        self,
+        prepared: PreparedTurn,
+        agent: Agent,
+        context: dict,
+        accumulated: str,
+        response_seconds: float,
+        inter_turn_gap_seconds: float | None,
+    ):
+        participant = prepared.participant
         payload = {
             "type": "agent_message",
             "agent_id": participant["id"],
@@ -651,22 +1054,106 @@ class DebateEngine:
             "mascot": participant["mascot"],
             "role": participant["role"],
             "specialty": participant["specialty"],
+            "specialtyLabel": participant.get("specialtyLabel"),
+            "provider": participant.get("provider"),
+            "model": participant.get("model"),
             "content": accumulated,
             "emotion": detect_emotion(accumulated),
-            "round": round_number,
+            "responseSeconds": round(response_seconds, 1),
+            "round": prepared.round_number,
             "author_type": "agent",
         }
+        if inter_turn_gap_seconds is not None:
+            payload["interTurnGapSeconds"] = round(inter_turn_gap_seconds, 1)
+        if agent.last_tool_call:
+            payload["toolCalls"] = [agent.last_tool_call]
         stored = self.repo.append_message(
-            room_id,
-            session_id,
+            prepared.room_id,
+            prepared.session_id,
             payload,
-            round_id=round_id,
-            round_number=round_number,
+            round_id=prepared.round_id,
+            round_number=prepared.round_number,
             message_type="agent_message",
             author_type="agent",
             participant_id=participant["id"],
         )
+        if agent.last_tool_call:
+            self.repo.add_room_event(
+                prepared.room_id,
+                prepared.session_id,
+                "tool_used",
+                {
+                    "participantId": participant["id"],
+                    "profileId": participant["profileId"],
+                    "tool": agent.last_tool_call.get("tool"),
+                    "query": agent.last_tool_call.get("query"),
+                    "ok": agent.last_tool_call.get("ok", True),
+                },
+            )
+        timing_payload = {
+            "participantId": participant["id"],
+            "profileId": participant["profileId"],
+            "round": prepared.round_number,
+            "responseSeconds": round(response_seconds, 1),
+        }
+        if inter_turn_gap_seconds is not None:
+            timing_payload["interTurnGapSeconds"] = round(inter_turn_gap_seconds, 1)
+        self.repo.add_room_event(
+            prepared.room_id,
+            prepared.session_id,
+            "turn_timing",
+            timing_payload,
+        )
         await self._broadcast(stored)
+        self._last_turn_committed_at = asyncio.get_running_loop().time()
+        self._round_started_at = None
+        await self._store_profile_memory(prepared.room_id, prepared.round_number, participant, context, accumulated)
+
+    async def _inject_planned_events(self, room_id: str, session_id: str, round_id: str, round_number: int):
+        events = self.repo.get_pending_events(room_id, session_id, round_number)
+        for event in events:
+            payload = {
+                "type": "system_event",
+                "agent_id": "system_event",
+                "participant_id": "system_event",
+                "profile_id": "system_event",
+                "agent_name": "⚡ Событие",
+                "name": "⚡ Событие",
+                "agent_emoji": "⚡",
+                "emoji": "⚡",
+                "mascot": None,
+                "role": "system",
+                "specialty": "",
+                "content": event["description"],
+                "round": round_number,
+                "eventId": event["id"],
+                "author_type": "system_event",
+            }
+            stored = self.repo.append_message(
+                room_id,
+                session_id,
+                payload,
+                round_id=round_id,
+                round_number=round_number,
+                message_type="system_event",
+                author_type="system_event",
+            )
+            fired_event = self.repo.mark_event_fired(event["id"]) or event
+            self.repo.add_room_event(
+                room_id,
+                session_id,
+                "event_injected",
+                {"plannedEventId": event["id"], "round": round_number, "description": event["description"]},
+            )
+            await self._broadcast(stored)
+            await self._broadcast({
+                "type": "event_injected",
+                "round": round_number,
+                "description": event["description"],
+                "event": fired_event,
+                "message": stored,
+                "plannedEvents": self.repo.list_planned_events(room_id, session_id),
+            })
 
     async def _review_round(self, room_id: str, session_id: str, round_state: RoundState) -> dict:
         self._state = "observer_review"
@@ -679,10 +1166,35 @@ class DebateEngine:
         room = snapshot["room"] if snapshot else {}
         events = self.repo.list_recent_room_events(room_id, session_id, limit=8)
         participants = round_state.order
+        observer_provider = session.get("observerProvider") or room.get("observerProvider")
+        observer_model = session.get("observerModel") or room.get("observerModel")
+        curated_recall = ""
+        try:
+            recent_insights = self.repo.list_session_insights(
+                observer_provider=observer_provider,
+                observer_model=observer_model,
+                limit=48,
+            )
+            relevant_insights = select_relevant_session_insights(
+                recent_insights,
+                topic=session["topic"],
+                participants=participants,
+                observer_provider=observer_provider,
+                observer_model=observer_model,
+                audience="observer",
+                limit=3,
+            )
+            curated_recall = format_insight_recall(
+                relevant_insights,
+                audience="observer",
+                limit=1200,
+            )
+        except Exception:
+            curated_recall = ""
         review = await self.chronomancer.review_round(
             topic=session["topic"],
-            observer_provider=room.get("observerProvider"),
-            observer_model=room.get("observerModel"),
+            observer_provider=observer_provider,
+            observer_model=observer_model,
             observer_mode=session["observerMode"],
             chronicle=session["chronicle"],
             round_number=round_state.round_number,
@@ -692,6 +1204,7 @@ class DebateEngine:
             wrap_requested=session["wrapRequested"],
             final_round_planned=session["finalRoundPlanned"],
             extension_count=session["extensionCount"],
+            curated_recall=curated_recall,
         )
 
         self.repo.complete_round(round_state.round_id, review)
@@ -791,6 +1304,8 @@ class DebateEngine:
     async def _complete_session(self, status: str, review: dict | None = None):
         if not self._running_session_id or not self._running_room_id:
             return
+        self._clear_round_rag_cache()
+        self._clear_prepared_turns()
         self.repo.update_session(
             self._running_session_id,
             {
@@ -798,6 +1313,28 @@ class DebateEngine:
                 "endedAt": utc_now(),
             },
         )
+        session = self.repo.get_session(self._running_session_id)
+        snapshot = self.repo.get_room_snapshot(self._running_room_id) or {}
+        room = snapshot.get("room") or {}
+        participants_block = snapshot.get("participants") or {}
+        participants = [
+            *(participants_block.get("active") or []),
+            *(participants_block.get("benched") or []),
+        ]
+        observer_reviews = self.repo.get_observer_reviews(self._running_session_id)
+        try:
+            session_insight = await asyncio.to_thread(
+                store_session_memories,
+                room=room,
+                session=session,
+                participants=participants,
+                review=review,
+                observer_reviews=observer_reviews,
+            )
+            if session_insight:
+                self.repo.save_session_insight(session_insight)
+        except Exception:
+            pass
         final_summary = (review or {}).get("chronicle") or (review or {}).get("roundSummary") or "Сессия завершена."
         await self._broadcast({
             "type": "session_completed",
@@ -811,35 +1348,155 @@ class DebateEngine:
         })
         await self._broadcast_room_loaded(self._running_room_id)
 
-    def _build_agent_context(self, room_id: str, session_id: str, round_number: int) -> dict:
-        snapshot = self.repo.get_room_snapshot(room_id)
-        session = self.repo.get_session(session_id)
-        messages = self.repo.list_session_messages(session_id, limit=48)
-        history = []
-        for message in messages:
-            author_type = message.get("author_type")
-            if author_type not in {"agent", "user"}:
-                continue
-            history.append({
-                "author_type": author_type,
-                "agent_name": message.get("agent_name") or message.get("name"),
-                "role": message.get("role", "participant"),
-                "specialty": message.get("specialty", "generalist"),
-                "content": message.get("content", ""),
-            })
-
+    def _build_agent_context(
+        self,
+        room_id: str,
+        session_id: str,
+        round_id: str,
+        round_number: int,
+        participant: dict | None = None,
+    ) -> dict:
+        base = self._build_agent_context_base(
+            room_id,
+            session_id,
+            round_id,
+            round_number,
+            participant=participant,
+        )
         return {
-            "topic": session["topic"] if session else "",
-            "room_summary": (snapshot or {}).get("room", {}).get("summary", ""),
-            "session_chronicle": session["chronicle"] if session else "",
-            "density_mode": (snapshot or {}).get("room", {}).get("densityMode", "normal"),
-            "history": history,
-            "wrap_signal": bool(session and session["wrapRequested"]),
-            "final_signal": bool(session and session["finalRoundPlanned"]),
-            "round_number": round_number,
-            "active_participants": (snapshot or {}).get("participants", {}).get("active", []),
-            "pinned_highlights": (snapshot or {}).get("pinnedMessages", []),
+            **base,
+            "history": self._build_agent_history(session_id),
         }
+
+    def _clear_round_rag_cache(self, round_id: str | None = None):
+        self._round_rag_cache.clear()
+        self._rag_cache_round_id = round_id
+
+    def _make_round_rag_cache_key(self, round_id: str, topic: str) -> str:
+        topic_hash = hashlib.sha1(topic.encode("utf-8")).hexdigest()[:12]
+        return f"{round_id}:{topic_hash}"
+
+    def _build_rag_query(self, ctx: dict) -> str:
+        topic = (ctx.get("topic") or "").strip()
+        recent = " ".join(
+            (message.get("content") or "").strip()[:200]
+            for message in ctx.get("history", [])[-3:]
+            if (message.get("content") or "").strip()
+        )
+        return ". ".join(part for part in [topic, recent] if part).strip()
+
+    async def _get_round_rag_context(self, round_id: str, ctx: dict) -> str:
+        graph_id = ctx.get("graph_id")
+        if not graph_id:
+            return ""
+
+        if self._rag_cache_round_id != round_id:
+            self._clear_round_rag_cache(round_id)
+
+        cache_key = self._make_round_rag_cache_key(round_id, ctx.get("topic") or "")
+        cached = self._round_rag_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        rag_query = self._build_rag_query(ctx)
+        if not rag_query:
+            self._round_rag_cache[cache_key] = ""
+            return ""
+
+        try:
+            rag_context = await asyncio.to_thread(
+                query_graph,
+                graph_id,
+                rag_query,
+                "hybrid",
+                20,
+            )
+        except Exception:
+            rag_context = ""
+
+        self._round_rag_cache[cache_key] = rag_context or ""
+        return self._round_rag_cache[cache_key]
+
+    def _build_profile_memory_text(
+        self,
+        *,
+        round_number: int,
+        participant: dict,
+        ctx: dict,
+        response_text: str,
+    ) -> str:
+        recent_messages = [
+            (message.get("agent_name") or "Участник", (message.get("content") or "").strip())
+            for message in ctx.get("history", [])[-3:]
+            if (message.get("content") or "").strip()
+        ]
+        last_3_messages_summary = " | ".join(
+            f"{author}: {content[:220]}"
+            for author, content in recent_messages
+        ) or "Нет релевантных сообщений перед этой репликой."
+        room_name = (ctx.get("room_name") or "").strip() or "Без названия"
+        topic = (ctx.get("topic") or "").strip() or "Без темы"
+        observer_provider = (ctx.get("observer_provider") or "").strip() or "unknown"
+        observer_model = (ctx.get("observer_model") or "").strip() or "unknown"
+        roster = ", ".join(
+            f"{item.get('name') or 'Без имени'} ({item.get('role') or 'participant'}/{item.get('specialtyLabel') or item.get('specialty') or 'generalist'})"
+            for item in ctx.get("active_participants", [])
+            if item.get("name")
+        ) or "Состав не указан."
+        return (
+            f"Тема: {topic}\n"
+            f"Раунд {round_number}, комната '{room_name}'.\n"
+            f"Наблюдатель сессии: {observer_provider}/{observer_model}.\n"
+            f"Персонаж: {participant['name']} ({participant['role']} / {participant.get('specialtyLabel') or participant['specialty']}).\n"
+            f"Текущий состав: {roster}\n"
+            f"Моя позиция: {(response_text or '').strip()[:500]}\n"
+            f"Ключевые аргументы собеседников: {last_3_messages_summary}"
+        )
+
+    async def _store_profile_memory(
+        self,
+        room_id: str,
+        round_number: int,
+        participant: dict,
+        ctx: dict,
+        response_text: str,
+    ):
+        profile_id = participant.get("profileId")
+        if not profile_id:
+            return
+
+        try:
+            memory_graph_id = participant.get("memoryGraphId") or self.repo.get_profile_memory_graph_id(profile_id)
+            created_graph = False
+            if not memory_graph_id:
+                memory_graph_id = create_profile_graph(profile_id)
+                self.repo.set_profile_memory_graph_id(profile_id, memory_graph_id)
+                participant["memoryGraphId"] = memory_graph_id
+                participant["hasMemory"] = True
+                created_graph = True
+
+            memory_text = self._build_profile_memory_text(
+                round_number=round_number,
+                participant=participant,
+                ctx=ctx,
+                response_text=response_text,
+            )
+            await asyncio.to_thread(
+                insert_text,
+                memory_graph_id,
+                [memory_text],
+                root_dir=PROFILE_GRAPH_ROOT,
+            )
+        except Exception:
+            return
+
+        if created_graph:
+            snapshot = self.repo.get_room_snapshot(room_id)
+            await self._broadcast({
+                "type": "participant_stats_updated",
+                "participants": snapshot["participants"] if snapshot else None,
+                "inventory": snapshot["inventory"] if snapshot else self.repo.list_saved_profiles(),
+            })
 
     async def _append_and_broadcast(self, room_id: str | None, session_id: str | None, payload: dict, *, round_id: str | None = None, round_number: int | None = None, message_type: str = "status", author_type: str = "system", participant_id: str | None = None):
         if not room_id or not session_id:

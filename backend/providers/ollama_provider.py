@@ -2,6 +2,7 @@ import json
 import httpx
 
 OLLAMA_BASE = "http://localhost:11434"
+OLLAMA_CLOUD_MODEL_HINTS = ["gemma4:31b-cloud"]
 
 
 class OllamaProvider:
@@ -19,7 +20,17 @@ class OllamaProvider:
                 resp = await client.get(f"{OLLAMA_BASE}/api/tags")
                 resp.raise_for_status()
                 models = resp.json().get("models", [])
-                return [m["name"] for m in models]
+                names = [m["name"] for m in models]
+                for model_name in OLLAMA_CLOUD_MODEL_HINTS:
+                    if model_name in names:
+                        continue
+                    try:
+                        show_resp = await client.post(f"{OLLAMA_BASE}/api/show", json={"model": model_name})
+                        if show_resp.status_code < 400:
+                            names.append(model_name)
+                    except Exception:
+                        continue
+                return names
         except Exception:
             return []
 

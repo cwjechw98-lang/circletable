@@ -1,45 +1,126 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import re
 from dataclasses import dataclass, field
+
+from knowledge.lightrag_adapter import PROFILE_GRAPH_ROOT, query_graph
 from providers import get_provider
+from tools import execute_agent_tool, get_tool_definitions
 
 
 # ────────────────────────────────────────────
-#  Emotion detection (keyword scoring)
+#  Emotion detection (hybrid: keyword + LLM)
 # ────────────────────────────────────────────
 
-_EMOTION_KW: dict[str, list[str]] = {
+# Weighted keyword lists: (keyword, weight)
+_EMOTION_KW: dict[str, list[tuple[str, int]]] = {
     "happy": [
-        "agree", "great", "excellent", "love", "amazing", "wonderful", "yes",
-        "absolutely", "perfect", "nice", "good", "соглас", "отлично", "прекрасно",
-        "люблю", "замечательно", "да", "идеально", "хорошо",
+        ("agree", 1), ("great", 1), ("excellent", 2), ("love", 2), ("amazing", 2),
+        ("wonderful", 2), ("yes", 1), ("absolutely", 2), ("perfect", 2), ("nice", 1),
+        ("good", 1), ("brilliant", 2), ("fantastic", 2), ("pleased", 1), ("glad", 1),
+        ("delighted", 2), ("superb", 2), ("bravo", 2), ("благодар", 2),
+        ("соглас", 1), ("отлично", 2), ("прекрасно", 2), ("люблю", 2),
+        ("замечательно", 2), ("да", 1), ("идеально", 2), ("хорошо", 1),
+        ("здорово", 2), ("молодец", 2), ("верно", 1), ("точно", 1),
+        ("именно", 1), ("браво", 2), ("превосходно", 2), ("чудесно", 2),
     ],
     "excited": [
-        "idea", "imagine", "what if", "revolutionary", "breakthrough", "eureka",
-        "exciting", "propose", "suggest", "идея", "представь", "революц",
-        "прорыв", "эврика", "предлагаю",
+        ("idea", 2), ("imagine", 2), ("what if", 2), ("revolutionary", 3),
+        ("breakthrough", 3), ("eureka", 3), ("exciting", 2), ("propose", 1),
+        ("suggest", 1), ("discover", 2), ("unlock", 2), ("potential", 1),
+        ("transform", 2), ("game-changer", 3), ("paradigm", 2), ("vision", 2),
+        ("идея", 2), ("представь", 2), ("революц", 3), ("прорыв", 3),
+        ("эврика", 3), ("предлагаю", 1), ("потенциал", 1), ("трансформ", 2),
+        ("открыт", 2), ("возможност", 2), ("перспектив", 2), ("вдохнов", 2),
+        ("амбициозн", 2), ("масштаб", 2),
     ],
     "laughing": [
-        "haha", "funny", "lol", "amusing", "hilarious", "joke", "laugh",
-        "ха-ха", "смешно", "шутка", "сме", "забавно",
+        ("haha", 3), ("funny", 2), ("lol", 3), ("amusing", 2), ("hilarious", 3),
+        ("joke", 2), ("laugh", 2), ("humor", 2), ("comedy", 2), ("witty", 2),
+        ("ironic", 2), ("sarcas", 2), ("absurd", 2),
+        ("ха-ха", 3), ("смешно", 2), ("шутка", 2), ("сме", 1), ("забавно", 2),
+        ("ирони", 2), ("комич", 2), ("абсурд", 2), ("анекдот", 2),
+        ("юмор", 2), ("хехе", 3), ("ахах", 3), ("лол", 3),
     ],
     "nervous": [
-        "worry", "risk", "danger", "careful", "afraid", "uncertain", "however",
-        "concern", "but", "трев", "риск", "опас", "осторож", "боюсь",
-        "неувер", "однако", "но",
+        ("worry", 2), ("risk", 2), ("danger", 2), ("careful", 1), ("afraid", 2),
+        ("uncertain", 2), ("however", 1), ("concern", 2), ("caveat", 2),
+        ("warning", 2), ("caution", 2), ("fragile", 2), ("volatile", 2),
+        ("трев", 2), ("риск", 2), ("опас", 2), ("осторож", 2), ("боюсь", 2),
+        ("неувер", 2), ("однако", 1), ("но", 1), ("сомне", 2), ("колеб", 2),
+        ("тревож", 2), ("хрупк", 2), ("уязвим", 2), ("предупрежд", 2),
+        ("проблем", 1), ("слож", 1),
     ],
     "angry": [
-        "wrong", "terrible", "never", "ridiculous", "nonsense", "disagree", "no way",
-        "неверно", "ужасно", "никогда", "нелепо", "чушь", "не соглас", "ни за что",
+        ("wrong", 2), ("terrible", 2), ("never", 1), ("ridiculous", 3),
+        ("nonsense", 3), ("disagree", 2), ("no way", 3), ("absurd", 2),
+        ("unacceptable", 3), ("outrageous", 3), ("foolish", 2), ("failure", 2),
+        ("catastroph", 3), ("incompetent", 3),
+        ("неверно", 2), ("ужасно", 2), ("никогда", 1), ("нелепо", 3),
+        ("чушь", 3), ("не соглас", 2), ("ни за что", 3), ("бред", 3),
+        ("провал", 2), ("недопустим", 3), ("возмутител", 3), ("глупо", 2),
+        ("безответствен", 3), ("катастроф", 3),
     ],
 }
 
+VALID_EMOTIONS = {"happy", "excited", "laughing", "nervous", "angry", "neutral"}
+
 
 def detect_emotion(text: str) -> str:
+    """Fast keyword-based emotion detection."""
+    emotion, _ = detect_emotion_scored(text)
+    return emotion
+
+
+def detect_emotion_scored(text: str) -> tuple[str, float]:
+    """Keyword-based emotion detection with confidence score (0.0-1.0)."""
     low = text.lower()
-    scores = {e: sum(1 for k in kws if k in low) for e, kws in _EMOTION_KW.items()}
+    scores: dict[str, int] = {}
+    for emotion, keywords in _EMOTION_KW.items():
+        scores[emotion] = sum(weight for kw, weight in keywords if kw in low)
+    total = sum(scores.values())
     best = max(scores, key=scores.get)
-    return best if scores[best] > 0 else "neutral"
+    if total == 0:
+        return "neutral", 0.0
+    confidence = scores[best] / max(total, 1)
+    return best, round(confidence, 2)
+
+
+async def detect_emotion_llm(
+    text: str,
+    provider_name: str,
+    model: str,
+    timeout: float = 8.0,
+) -> str | None:
+    """LLM-based emotion classification. Returns None on failure."""
+    try:
+        provider = get_provider(provider_name)
+        if not provider.is_available():
+            return None
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Classify the dominant emotion of the text into exactly one of: "
+                    "happy, excited, laughing, nervous, angry, neutral. "
+                    "Reply with only the single emotion word, nothing else."
+                ),
+            },
+            {"role": "user", "content": text[:500]},
+        ]
+
+        result = await asyncio.wait_for(
+            provider.stream_chat(model, messages, on_token=None),
+            timeout=timeout,
+        )
+
+        emotion = result.strip().lower().split()[0] if result.strip() else None
+        return emotion if emotion in VALID_EMOTIONS else None
+    except Exception:
+        return None
 
 
 # ────────────────────────────────────────────
@@ -262,6 +343,7 @@ class AgentConfig:
     model: str
     profile_id: str = ""
     specialty: str = "digital-generalist"
+    specialty_label: str = ""
     emoji: str = "🧙"
     mascot: str = "wizard"  # mascot sprite id
 
@@ -273,24 +355,47 @@ class Agent:
         self.name = cfg.name
         self.role = cfg.role
         self.specialty = cfg.specialty
+        self.specialty_label = cfg.specialty_label
         self.provider_name = cfg.provider
         self.model = cfg.model
         self.emoji = cfg.emoji
         self.mascot = cfg.mascot
         self._provider = get_provider(cfg.provider)
+        self.last_tool_call: dict | None = None
 
     # ── prompt ──
 
-    def _system_prompt(self) -> str:
+    def _system_prompt(self, rag_context: str | None = None, memory_context: str | None = None) -> str:
         role_desc = ROLE_DESCRIPTIONS.get(self.role, f"You are a {self.role}.")
         specialty_desc = SPECIALTY_DESCRIPTIONS.get(
             self.specialty,
-            f"You bring a professional lens shaped by {self.specialty.replace('-', ' ')}.",
+            (
+                f"You bring the professional lens of {self.specialty_label or self.specialty.replace('-', ' ')}. "
+                "Use that domain expertise explicitly when judging trade-offs and evidence."
+            ),
         )
-        return (
+        prompt = (
             f"You are {self.name}, participating in an AI round-table discussion.\n"
             f"Debate style: {role_desc}\n"
             f"Professional lens: {specialty_desc}\n\n"
+        )
+        if memory_context:
+            prompt += (
+                "=== Твои прошлые рассуждения по схожим темам ===\n"
+                f"{memory_context}\n"
+                "===\n"
+                "Можешь развивать прежние идеи или пересматривать позицию. "
+                "Если уместно, естественно вспоминай прошлые совместные обсуждения с текущими участниками.\n\n"
+            )
+        if rag_context:
+            prompt += (
+                "=== Предметный контекст (из загруженных документов) ===\n"
+                f"{rag_context}\n"
+                "===\n"
+                "Используй эти факты для обоснования аргументов. "
+                "Не цитируй дословно — перефразируй.\n\n"
+            )
+        prompt += (
             "Rules:\n"
             "- Read what others said and respond thoughtfully.\n"
             "- Either agree (with reasoning), respectfully disagree, or add a new angle.\n"
@@ -303,10 +408,59 @@ class Agent:
             "- If the topic is outside your expertise, adapt thoughtfully but keep your lens.\n"
             "- Do NOT greet or introduce yourself — just respond."
         )
+        return prompt
+
+    def _build_rag_query(self, ctx: dict) -> str:
+        topic = ctx.get("topic", "").strip()
+        history = ctx.get("history", [])
+        recent = " ".join(
+            (message.get("content") or "").strip()[:200]
+            for message in history[-3:]
+            if (message.get("content") or "").strip()
+        )
+        parts = [part for part in [topic, recent] if part]
+        return ". ".join(parts).strip()
+
+    def _build_memory_query(self, ctx: dict) -> str:
+        topic = (ctx.get("topic") or "").strip()
+        active_names = [
+            item.get("name")
+            for item in ctx.get("active_participants", [])
+            if item.get("name") and item.get("name") != self.name
+        ][:5]
+        recent = " ".join(
+            (message.get("content") or "").strip()[:160]
+            for message in ctx.get("history", [])[-3:]
+            if (message.get("content") or "").strip()
+        )
+        base = f"Моё мнение: {topic}" if topic else ""
+        social = f"Совместные обсуждения с: {', '.join(active_names)}" if active_names else ""
+        observer = ""
+        if ctx.get("observer_provider") and ctx.get("observer_model"):
+            observer = f"Наблюдатель: {ctx['observer_provider']}/{ctx['observer_model']}"
+        return ". ".join(part for part in [base, social, observer, recent] if part).strip()
+
+    def _truncate_rag_context(self, rag_context: str, limit: int = 8000) -> str:
+        text = (rag_context or "").strip()
+        if len(text) <= limit:
+            return text
+
+        clipped = text[:limit].rstrip()
+        sentence_end = max(clipped.rfind("."), clipped.rfind("!"), clipped.rfind("?"))
+        if sentence_end >= int(limit * 0.6):
+            return clipped[:sentence_end + 1].rstrip()
+
+        line_break = clipped.rfind("\n")
+        if line_break >= int(limit * 0.6):
+            return clipped[:line_break].rstrip()
+
+        whitespace = clipped.rfind(" ")
+        if whitespace >= int(limit * 0.6):
+            return clipped[:whitespace].rstrip()
+
+        return clipped
 
     def _build_messages(self, ctx: dict) -> list[dict]:
-        msgs: list[dict] = [{"role": "system", "content": self._system_prompt()}]
-
         topic = ctx.get("topic", "")
         room_summary = ctx.get("room_summary", "")
         session_chronicle = ctx.get("session_chronicle", "")
@@ -317,6 +471,45 @@ class Agent:
         participants = ctx.get("active_participants", [])
         pinned_highlights = ctx.get("pinned_highlights", [])
         history = ctx.get("history", [])
+        graph_id = ctx.get("graph_id")
+        memory_graph_id = ctx.get("memory_graph_id")
+        tool_result = ctx.get("tool_result")
+
+        rag_context_supplied = "rag_context" in ctx
+        rag_context = (ctx.get("rag_context") or "").strip()
+        if not rag_context_supplied and graph_id:
+            try:
+                rag_query = self._build_rag_query(ctx)
+                if rag_query:
+                    rag_context = query_graph(graph_id, rag_query, mode="hybrid", top_k=20)
+            except Exception:
+                rag_context = ""
+        rag_context = self._truncate_rag_context(rag_context, limit=8000) if rag_context else ""
+
+        memory_context_supplied = "memory_context" in ctx
+        memory_context = (ctx.get("memory_context") or "").strip()
+        if not memory_context_supplied and memory_graph_id:
+            try:
+                memory_query = self._build_memory_query(ctx)
+                if memory_query:
+                    memory_context = query_graph(
+                        memory_graph_id,
+                        memory_query,
+                        mode="hybrid",
+                        top_k=10,
+                        root_dir=PROFILE_GRAPH_ROOT,
+                    )
+            except Exception:
+                memory_context = ""
+        memory_context = self._truncate_rag_context(memory_context, limit=4000) if memory_context else ""
+
+        msgs: list[dict] = [{
+            "role": "system",
+            "content": self._system_prompt(
+                rag_context=rag_context,
+                memory_context=memory_context,
+            ),
+        }]
 
         context_chunks: list[str] = [f'Тема обсуждения: "{topic}"']
         if room_summary:
@@ -327,7 +520,7 @@ class Agent:
             context_chunks.append("Отвечай строго на русском языке, без англоязычных вставок.")
         if participants:
             roster = ", ".join(
-                f"{item['name']} ({item['role'].replace('-', ' ')} / {item['specialty'].replace('-', ' ')})"
+                f"{item.get('name') or 'Безымянный'} ({str(item.get('role') or 'participant').replace('-', ' ')} / {(item.get('specialtyLabel') or str(item.get('specialty') or 'generalist').replace('-', ' '))})"
                 for item in participants
             )
             context_chunks.append(f"Текущий состав стола: {roster}")
@@ -337,6 +530,13 @@ class Agent:
                 for item in pinned_highlights[:4]
             ]
             context_chunks.append("Сильные зацепки, которые пользователь закрепил:\n" + "\n".join(highlight_lines))
+        if tool_result:
+            tool_status = "успешно" if tool_result.get("ok", True) else f"с ошибкой: {tool_result.get('error', '')}"
+            context_chunks.append(
+                "Результат инструмента "
+                f"{tool_result.get('tool')} для запроса \"{tool_result.get('query')}\": {tool_status}\n"
+                f"{tool_result.get('result') or tool_result.get('error') or 'Нет результата.'}"
+            )
         if round_number:
             context_chunks.append(f"Сейчас идёт раунд {round_number}.")
         if density_mode == "calm":
@@ -378,6 +578,9 @@ class Agent:
 
     def _render_history_line(self, message: dict) -> str:
         author_type = message.get("author_type", "agent")
+        if author_type == "system_event" or message.get("type") == "system_event":
+            return f"⚡ СОБЫТИЕ: {message['content']}"
+
         if author_type == "user":
             return f"Пользователь: {message['content']}"
 
@@ -385,7 +588,7 @@ class Agent:
             return f"Хрономант: {message['content']}"
 
         role = message.get("role", "participant").replace("-", " ")
-        specialty = message.get("specialty", "generalist").replace("-", " ")
+        specialty = message.get("specialtyLabel") or message.get("specialty", "generalist").replace("-", " ")
         return f"{message['agent_name']} [{role} | {specialty}]: {message['content']}"
 
     def _should_force_russian(self, topic: str, history: list[dict]) -> bool:
@@ -397,5 +600,110 @@ class Agent:
     # ── generation ──
 
     async def generate(self, ctx: dict, on_token=None) -> str:
+        self.last_tool_call = None
+        tools = self._enabled_tools(ctx)
+        if tools:
+            decision_messages = self._build_tool_decision_messages(ctx, tools)
+            decision = await self._provider.stream_chat(self.model, decision_messages, None)
+            tool_call = self._parse_tool_call(decision, tools)
+            if tool_call:
+                tool_result = await execute_agent_tool(tool_call["tool"], tool_call["arguments"], ctx)
+                self.last_tool_call = tool_result
+                messages = self._build_messages({**ctx, "tool_result": tool_result})
+                final_text = await self._provider.stream_chat(self.model, messages, None)
+                direct = self._sanitize_final_tool_answer(final_text, tools, tool_result)
+                if on_token:
+                    for chunk in self._stream_chunks(direct):
+                        await on_token(chunk)
+                return direct
+
+            direct = self._parse_direct_answer(decision)
+            if on_token:
+                for chunk in self._stream_chunks(direct):
+                    await on_token(chunk)
+            return direct
+
         messages = self._build_messages(ctx)
         return await self._provider.stream_chat(self.model, messages, on_token)
+
+    def _enabled_tools(self, ctx: dict) -> dict[str, dict]:
+        names: list[str] = ["calculate"]
+        if ctx.get("graph_id"):
+            names.append("search_knowledge")
+        internet_mode = str(
+            ctx.get("internet_mode")
+            or ctx.get("internetMode")
+            or (ctx.get("tools") or {}).get("internet_mode")
+            or (ctx.get("tools") or {}).get("internetMode")
+            or ""
+        ).strip().lower()
+        if internet_mode in {"auto", "on"}:
+            names.append("web_search")
+        return get_tool_definitions(names)
+
+    def _build_tool_decision_messages(self, ctx: dict, tools: dict[str, dict]) -> list[dict]:
+        messages = self._build_messages(ctx)
+        tool_lines = [
+            f"- {name}: {spec['description']}; parameters={json.dumps(spec['parameters'], ensure_ascii=False)}"
+            for name, spec in tools.items()
+        ]
+        tool_prompt = (
+            "Перед ответом реши, нужен ли один инструмент. Доступные инструменты:\n"
+            + "\n".join(tool_lines)
+            + "\n\nЕсли инструмент нужен, ответь только JSON без markdown:\n"
+            '{"action":"use_tool","tool":"search_knowledge","query":"точный запрос"}\n'
+            "Для calculate используй поле expression или query.\n"
+            "Если инструмент не нужен, дай обычную финальную реплику без JSON.\n"
+            "Максимум один tool call."
+        )
+        messages[0] = {**messages[0], "content": f"{messages[0]['content']}\n\n{tool_prompt}"}
+        return messages
+
+    def _parse_tool_call(self, text: str, tools: dict[str, dict]) -> dict | None:
+        payload = self._extract_json_object(text)
+        if not payload or payload.get("action") != "use_tool":
+            return None
+        tool_name = payload.get("tool")
+        if tool_name not in tools:
+            return None
+        arguments = payload.get("arguments")
+        if not isinstance(arguments, dict):
+            arguments = {}
+        if payload.get("query") is not None:
+            arguments["query"] = payload.get("query")
+        if payload.get("expression") is not None:
+            arguments["expression"] = payload.get("expression")
+        return {"tool": tool_name, "arguments": arguments}
+
+    def _parse_direct_answer(self, text: str) -> str:
+        payload = self._extract_json_object(text)
+        if payload and payload.get("action") == "answer" and payload.get("content"):
+            return str(payload["content"]).strip()
+        return (text or "").strip()
+
+    def _sanitize_final_tool_answer(self, text: str, tools: dict[str, dict], tool_result: dict) -> str:
+        if self._parse_tool_call(text, tools):
+            fallback = str(tool_result.get("result") or tool_result.get("error") or "").strip()
+            return fallback or "Инструмент сработал, но финальная реплика модели не пришла."
+        direct = self._parse_direct_answer(text)
+        return direct or "Инструмент сработал, но финальная реплика модели не пришла."
+
+    def _extract_json_object(self, text: str) -> dict | None:
+        stripped = (text or "").strip()
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, flags=re.DOTALL)
+        if fenced:
+            stripped = fenced.group(1)
+        elif not stripped.startswith("{"):
+            match = re.search(r"\{.*\}", stripped, flags=re.DOTALL)
+            if not match:
+                return None
+            stripped = match.group(0)
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _stream_chunks(self, text: str, size: int = 24):
+        for index in range(0, len(text), size):
+            yield text[index:index + size]

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
+
+from storage_layers import BusinessAggregates, PayloadBuilder, SchemaManager
 
 
 def utc_now() -> str:
@@ -14,6 +17,11 @@ def utc_now() -> str:
 
 def make_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+def slugify_label(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
+    return slug[:48].strip("-") or "expertise"
 
 
 def dumps_json(value) -> str:
@@ -32,9 +40,31 @@ def loads_json(value, fallback):
 class Repository:
     def __init__(self, db_path: str):
         self.db_path = db_path
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        directory = os.path.dirname(db_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self._schema = SchemaManager(
+            self.conn,
+            normalize_room_settings=self._normalize_room_settings,
+            loads_json=loads_json,
+            dumps_json=dumps_json,
+            utc_now=utc_now,
+        )
+        self._payloads = PayloadBuilder(
+            self,
+            loads_json=loads_json,
+            normalize_room_settings=self._normalize_room_settings,
+        )
+        self._aggregates = BusinessAggregates(
+            self,
+            payloads=self._payloads,
+            loads_json=loads_json,
+            dumps_json=dumps_json,
+            utc_now=utc_now,
+            make_id=make_id,
+        )
         self._create_tables()
         self._migrate_schema()
 
@@ -42,189 +72,34 @@ class Repository:
         self.conn.close()
 
     def _create_tables(self):
-        cur = self.conn.cursor()
-        cur.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS app_state (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS character_profiles (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                role TEXT NOT NULL,
-                specialty TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                model TEXT NOT NULL,
-                emoji TEXT NOT NULL,
-                mascot TEXT NOT NULL,
-                stats_json TEXT NOT NULL,
-                strengths_json TEXT NOT NULL,
-                weaknesses_json TEXT NOT NULL,
-                summary TEXT NOT NULL,
-                last_note TEXT NOT NULL,
-                is_saved INTEGER NOT NULL DEFAULT 0,
-                system_provided INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS rooms (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                observer_mode TEXT NOT NULL DEFAULT 'suggest',
-                density_mode TEXT NOT NULL DEFAULT 'normal',
-                observer_provider TEXT,
-                observer_model TEXT,
-                current_session_id TEXT,
-                summary TEXT NOT NULL DEFAULT '',
-                last_topic TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS room_participants (
-                id TEXT PRIMARY KEY,
-                room_id TEXT NOT NULL,
-                profile_id TEXT NOT NULL,
-                status TEXT NOT NULL,
-                position INTEGER NOT NULL DEFAULT 0,
-                name TEXT NOT NULL,
-                role TEXT NOT NULL,
-                specialty TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                model TEXT NOT NULL,
-                emoji TEXT NOT NULL,
-                mascot TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                room_id TEXT NOT NULL,
-                title TEXT NOT NULL DEFAULT '',
-                topic TEXT NOT NULL,
-                status TEXT NOT NULL,
-                observer_mode TEXT NOT NULL,
-                chronicle TEXT NOT NULL DEFAULT '',
-                wrap_requested INTEGER NOT NULL DEFAULT 0,
-                final_requested INTEGER NOT NULL DEFAULT 0,
-                final_round_planned INTEGER NOT NULL DEFAULT 0,
-                extension_count INTEGER NOT NULL DEFAULT 0,
-                last_round_number INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                started_at TEXT,
-                ended_at TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS rounds (
-                id TEXT PRIMARY KEY,
-                room_id TEXT NOT NULL,
-                session_id TEXT NOT NULL,
-                round_number INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                summary TEXT NOT NULL DEFAULT '',
-                chronicle_after TEXT NOT NULL DEFAULT '',
-                recommendation TEXT NOT NULL DEFAULT 'continue',
-                created_at TEXT NOT NULL,
-                completed_at TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS messages (
-                id TEXT PRIMARY KEY,
-                room_id TEXT NOT NULL,
-                session_id TEXT NOT NULL,
-                round_id TEXT,
-                round_number INTEGER,
-                message_type TEXT NOT NULL,
-                author_type TEXT NOT NULL,
-                participant_id TEXT,
-                created_at TEXT NOT NULL,
-                payload_json TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS room_events (
-                id TEXT PRIMARY KEY,
-                room_id TEXT NOT NULL,
-                session_id TEXT,
-                event_type TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS observer_reviews (
-                id TEXT PRIMARY KEY,
-                room_id TEXT NOT NULL,
-                session_id TEXT NOT NULL,
-                round_id TEXT NOT NULL,
-                round_number INTEGER NOT NULL,
-                summary TEXT NOT NULL,
-                chronicle_before TEXT NOT NULL,
-                chronicle_after TEXT NOT NULL,
-                recommendation TEXT NOT NULL,
-                suggested_rounds_left INTEGER,
-                comments_json TEXT NOT NULL,
-                achievements_json TEXT NOT NULL,
-                stats_delta_json TEXT NOT NULL,
-                progress_json TEXT NOT NULL DEFAULT '{}',
-                final_reason TEXT NOT NULL DEFAULT '',
-                missing_expert_hint TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS pinned_messages (
-                id TEXT PRIMARY KEY,
-                room_id TEXT NOT NULL,
-                session_id TEXT NOT NULL,
-                message_id TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                UNIQUE(session_id, message_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS team_presets (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                participants_json TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            """
-        )
-        self.conn.commit()
+        self._schema.create_tables()
 
     def _migrate_schema(self):
-        session_columns = {
-            row["name"]
-            for row in self.conn.execute("PRAGMA table_info(sessions)").fetchall()
-        }
-        if "title" not in session_columns:
-            self.conn.execute("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
-            self.conn.commit()
+        self._schema.migrate_schema()
 
-        room_columns = {
-            row["name"]
-            for row in self.conn.execute("PRAGMA table_info(rooms)").fetchall()
-        }
-        if "density_mode" not in room_columns:
-            self.conn.execute("ALTER TABLE rooms ADD COLUMN density_mode TEXT NOT NULL DEFAULT 'normal'")
-            self.conn.commit()
+    def _normalize_room_settings(self, settings: dict | None) -> dict:
+        raw = dict(settings or {})
+        available_tools = raw.get("available_tools", raw.get("availableTools"))
+        if not isinstance(available_tools, list):
+            available_tools = ["search_knowledge", "calculate"]
+        legacy_available_tools = [
+            str(tool)
+            for tool in available_tools
+            if str(tool) in {"search_knowledge", "web_search", "calculate"}
+        ]
+        if not legacy_available_tools:
+            legacy_available_tools = ["search_knowledge", "calculate"]
 
-        review_columns = {
-            row["name"]
-            for row in self.conn.execute("PRAGMA table_info(observer_reviews)").fetchall()
+        tools_enabled = bool(raw.get("tools_enabled", raw.get("toolsEnabled", False)))
+        internet_mode = str(raw.get("internet_mode", raw.get("internetMode", "")) or "").strip().lower()
+        if internet_mode not in {"off", "auto", "on"}:
+            internet_mode = "auto" if tools_enabled and "web_search" in legacy_available_tools else "off"
+
+        return {
+            "internet_mode": internet_mode,
+            "tools_enabled": tools_enabled,
+            "available_tools": legacy_available_tools,
         }
-        if "progress_json" not in review_columns:
-            self.conn.execute("ALTER TABLE observer_reviews ADD COLUMN progress_json TEXT NOT NULL DEFAULT '{}'")
-            self.conn.commit()
-        if "final_reason" not in review_columns:
-            self.conn.execute("ALTER TABLE observer_reviews ADD COLUMN final_reason TEXT NOT NULL DEFAULT ''")
-            self.conn.commit()
-        if "missing_expert_hint" not in review_columns:
-            self.conn.execute("ALTER TABLE observer_reviews ADD COLUMN missing_expert_hint TEXT NOT NULL DEFAULT ''")
-            self.conn.commit()
 
     def bootstrap(self, default_profiles: list[dict], observer_provider: str | None, observer_model: str | None):
         now = utc_now()
@@ -330,8 +205,8 @@ class Repository:
                 """
                 INSERT INTO rooms (
                     id, name, observer_mode, density_mode, observer_provider, observer_model,
-                    current_session_id, summary, last_topic, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    current_session_id, summary, last_topic, settings_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     room_id,
@@ -343,6 +218,7 @@ class Repository:
                     None,
                     "",
                     "",
+                    dumps_json({"internet_mode": "auto"}),
                     now,
                     now,
                 ),
@@ -434,70 +310,70 @@ class Repository:
         self.conn.commit()
 
     def _profile_payload(self, row: sqlite3.Row) -> dict:
-        return {
-            "id": row["id"],
-            "name": row["name"],
-            "role": row["role"],
-            "specialty": row["specialty"],
-            "provider": row["provider"],
-            "model": row["model"],
-            "emoji": row["emoji"],
-            "mascot": row["mascot"],
-            "stats": loads_json(row["stats_json"], {}),
-            "strengths": loads_json(row["strengths_json"], []),
-            "weaknesses": loads_json(row["weaknesses_json"], []),
-            "summary": row["summary"],
-            "lastNote": row["last_note"],
-            "isSaved": bool(row["is_saved"]),
-            "systemProvided": bool(row["system_provided"]),
-        }
+        return self._payloads.profile(row)
 
     def _session_payload(self, row: sqlite3.Row | None) -> dict | None:
-        if not row:
-            return None
-        return {
-            "id": row["id"],
-            "title": row["title"],
-            "topic": row["topic"],
-            "status": row["status"],
-            "observerMode": row["observer_mode"],
-            "chronicle": row["chronicle"],
-            "wrapRequested": bool(row["wrap_requested"]),
-            "finalRequested": bool(row["final_requested"]),
-            "finalRoundPlanned": bool(row["final_round_planned"]),
-            "extensionCount": row["extension_count"],
-            "lastRoundNumber": row["last_round_number"],
-            "createdAt": row["created_at"],
-            "updatedAt": row["updated_at"],
-            "startedAt": row["started_at"],
-            "endedAt": row["ended_at"],
-        }
+        return self._payloads.session(row)
 
     def _participant_payload(self, row: sqlite3.Row) -> dict:
-        profile = self.conn.execute(
-            "SELECT * FROM character_profiles WHERE id = ?",
-            (row["profile_id"],),
+        return self._payloads.participant(row)
+
+    def _observer_review_payload(self, row: sqlite3.Row) -> dict:
+        return self._payloads.observer_review(row)
+
+    def _report_payload(self, row: sqlite3.Row | None) -> dict | None:
+        return self._payloads.report(row)
+
+    def _fact_check_claim_payload(self, row: sqlite3.Row) -> dict:
+        return self._payloads.fact_check_claim(row)
+
+    def _fact_check_run_payload(self, row: sqlite3.Row | None, *, claims: list[dict] | None = None) -> dict | None:
+        return self._payloads.fact_check_run(row, claims=claims)
+
+    def _model_reliability_payload(self, row: sqlite3.Row | None) -> dict | None:
+        return self._payloads.model_reliability(row)
+
+    def _session_insight_payload(self, row: sqlite3.Row | None) -> dict | None:
+        return self._payloads.session_insight(row)
+
+    def _planned_event_payload(self, row: sqlite3.Row) -> dict:
+        return self._payloads.planned_event(row)
+
+    def _custom_specialty_payload(self, row: sqlite3.Row | None) -> dict | None:
+        return self._payloads.custom_specialty(row)
+
+    def get_custom_specialty_label(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        row = self.conn.execute(
+            "SELECT label FROM custom_specialties WHERE value = ?",
+            (value,),
         ).fetchone()
-        return {
-            "id": row["id"],
-            "profileId": row["profile_id"],
-            "status": row["status"],
-            "position": row["position"],
-            "name": row["name"],
-            "role": row["role"],
-            "specialty": row["specialty"],
-            "provider": row["provider"],
-            "model": row["model"],
-            "emoji": row["emoji"],
-            "mascot": row["mascot"],
-            "stats": loads_json(profile["stats_json"], {}) if profile else {},
-            "strengths": loads_json(profile["strengths_json"], []) if profile else [],
-            "weaknesses": loads_json(profile["weaknesses_json"], []) if profile else [],
-            "summary": profile["summary"] if profile else "",
-            "lastNote": profile["last_note"] if profile else "",
-            "isSavedProfile": bool(profile["is_saved"]) if profile else False,
-            "systemProvided": bool(profile["system_provided"]) if profile else False,
-        }
+        return row["label"] if row else None
+
+    def _score_reliability_counts(self, counts: dict[str, int]) -> float:
+        total = sum(max(int(counts.get(key, 0)), 0) for key in (
+            "confirmed",
+            "unverified",
+            "contradicted",
+            "disputed",
+            "insufficient_evidence",
+        ))
+        if total <= 0:
+            return 0.0
+        weighted = (
+            counts.get("confirmed", 0) * 1.0
+            + counts.get("unverified", 0) * 0.45
+            + counts.get("disputed", 0) * 0.25
+            + counts.get("insufficient_evidence", 0) * 0.1
+        )
+        return round((weighted / total) * 100, 1)
+
+    def _room_settings_payload(self, row: sqlite3.Row) -> dict:
+        return self._payloads.room_settings(row)
+
+    def _room_payload(self, row: sqlite3.Row) -> dict:
+        return self._payloads.room(row)
 
     def list_rooms(self) -> list[dict]:
         cur = self.conn.cursor()
@@ -533,14 +409,7 @@ class Repository:
                 (room["id"],),
             ).fetchone()
             result.append({
-                "id": room["id"],
-                "name": room["name"],
-                "observerMode": room["observer_mode"],
-                "densityMode": room["density_mode"],
-                "observerProvider": room["observer_provider"],
-                "observerModel": room["observer_model"],
-                "summary": room["summary"],
-                "lastTopic": room["last_topic"],
+                **self._room_payload(room),
                 "activeCount": room["active_count"],
                 "benchedCount": room["benched_count"],
                 "latestSession": {
@@ -559,6 +428,144 @@ class Repository:
             "SELECT * FROM character_profiles WHERE is_saved = 1 ORDER BY updated_at DESC, name ASC"
         ).fetchall()
         return [self._profile_payload(row) for row in rows]
+
+    def list_custom_specialties(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM custom_specialties ORDER BY group_label ASC, label ASC"
+        ).fetchall()
+        return [self._custom_specialty_payload(row) for row in rows]
+
+    def list_custom_specialty_groups(self) -> list[dict]:
+        grouped: dict[str, list[dict]] = {}
+        for item in self.list_custom_specialties():
+            group_label = item.get("groupLabel") or "Кастомные оптики"
+            grouped.setdefault(group_label, []).append({
+                "id": item["id"],
+                "value": item["value"],
+                "label": item["label"],
+                "description": item.get("description", ""),
+                "groupLabel": group_label,
+            })
+        return [
+            {"label": group_label, "options": options}
+            for group_label, options in grouped.items()
+        ]
+
+    def _unique_custom_specialty_value(self, label: str, value: str | None = None) -> str:
+        base = re.sub(r"[^a-z0-9-]+", "-", (value or "").lower()).strip("-")
+        if not base:
+            base = f"custom-{slugify_label(label)}"
+        if not base.startswith("custom-"):
+            base = f"custom-{base}"
+        candidate = base[:64].strip("-")
+        suffix = 2
+        while self.conn.execute("SELECT 1 FROM custom_specialties WHERE value = ?", (candidate,)).fetchone():
+            suffix_text = f"-{suffix}"
+            candidate = f"{base[:64 - len(suffix_text)].strip('-')}{suffix_text}"
+            suffix += 1
+        return candidate
+
+    def create_custom_specialty(
+        self,
+        label: str,
+        *,
+        group_label: str = "Кастомные оптики",
+        description: str = "",
+        value: str | None = None,
+    ) -> dict:
+        normalized_label = label.strip()
+        normalized_group = (group_label or "Кастомные оптики").strip() or "Кастомные оптики"
+        existing = self.conn.execute(
+            """
+            SELECT *
+            FROM custom_specialties
+            WHERE lower(label) = lower(?) AND lower(group_label) = lower(?)
+            """,
+            (normalized_label, normalized_group),
+        ).fetchone()
+        if existing:
+            return self._custom_specialty_payload(existing)
+
+        now = utc_now()
+        specialty_id = make_id("spec")
+        specialty_value = self._unique_custom_specialty_value(normalized_label, value=value)
+        self.conn.execute(
+            """
+            INSERT INTO custom_specialties (
+                id, value, label, group_label, description, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                specialty_id,
+                specialty_value,
+                normalized_label,
+                normalized_group,
+                description.strip(),
+                now,
+                now,
+            ),
+        )
+        self.conn.commit()
+        row = self.conn.execute("SELECT * FROM custom_specialties WHERE id = ?", (specialty_id,)).fetchone()
+        return self._custom_specialty_payload(row)
+
+    def update_custom_specialty(self, specialty_id: str, fields: dict) -> dict | None:
+        current = self.conn.execute("SELECT * FROM custom_specialties WHERE id = ?", (specialty_id,)).fetchone()
+        if not current:
+            return None
+
+        updates: list[str] = []
+        values: list[object] = []
+        if "label" in fields:
+            label = str(fields.get("label") or "").strip()
+            if label:
+                updates.append("label = ?")
+                values.append(label)
+        if "groupLabel" in fields or "group_label" in fields:
+            group_label = str(fields.get("groupLabel", fields.get("group_label")) or "").strip()
+            updates.append("group_label = ?")
+            values.append(group_label or "Кастомные оптики")
+        if "description" in fields:
+            updates.append("description = ?")
+            values.append(str(fields.get("description") or "").strip())
+
+        if not updates:
+            return self._custom_specialty_payload(current)
+
+        updates.append("updated_at = ?")
+        values.extend([utc_now(), specialty_id])
+        self.conn.execute(
+            f"UPDATE custom_specialties SET {', '.join(updates)} WHERE id = ?",
+            values,
+        )
+        self.conn.commit()
+        row = self.conn.execute("SELECT * FROM custom_specialties WHERE id = ?", (specialty_id,)).fetchone()
+        return self._custom_specialty_payload(row)
+
+    def custom_specialty_usage(self, value: str) -> int:
+        profile_count = self.conn.execute(
+            "SELECT COUNT(*) FROM character_profiles WHERE specialty = ?",
+            (value,),
+        ).fetchone()[0]
+        participant_count = self.conn.execute(
+            "SELECT COUNT(*) FROM room_participants WHERE specialty = ?",
+            (value,),
+        ).fetchone()[0]
+        preset_count = self.conn.execute(
+            "SELECT COUNT(*) FROM team_presets WHERE participants_json LIKE ?",
+            (f"%{value}%",),
+        ).fetchone()[0]
+        return int(profile_count) + int(participant_count) + int(preset_count)
+
+    def delete_custom_specialty(self, specialty_id: str) -> str:
+        row = self.conn.execute("SELECT * FROM custom_specialties WHERE id = ?", (specialty_id,)).fetchone()
+        if not row:
+            return "missing"
+        if self.custom_specialty_usage(row["value"]) > 0:
+            return "in_use"
+        self.conn.execute("DELETE FROM custom_specialties WHERE id = ?", (specialty_id,))
+        self.conn.commit()
+        return "deleted"
 
     def list_team_presets(self) -> list[dict]:
         rows = self.conn.execute(
@@ -679,125 +686,44 @@ class Repository:
     def room_exists(self, room_id: str) -> bool:
         return bool(self.conn.execute("SELECT 1 FROM rooms WHERE id = ?", (room_id,)).fetchone())
 
+    def get_room_graph_id(self, room_id: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT graph_id FROM rooms WHERE id = ?",
+            (room_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return row["graph_id"] or None
+
+    def set_room_graph_id(self, room_id: str, graph_id: str | None):
+        self.conn.execute(
+            "UPDATE rooms SET graph_id = ?, updated_at = ? WHERE id = ?",
+            (graph_id, utc_now(), room_id),
+        )
+        self.conn.commit()
+
+    def get_profile_memory_graph_id(self, profile_id: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT memory_graph_id FROM character_profiles WHERE id = ?",
+            (profile_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return row["memory_graph_id"] or None
+
+    def set_profile_memory_graph_id(self, profile_id: str, graph_id: str | None):
+        self.conn.execute(
+            "UPDATE character_profiles SET memory_graph_id = ?, updated_at = ? WHERE id = ?",
+            (graph_id, utc_now(), profile_id),
+        )
+        self.conn.commit()
+
     def get_profile(self, profile_id: str) -> dict | None:
         row = self.conn.execute("SELECT * FROM character_profiles WHERE id = ?", (profile_id,)).fetchone()
         return self._profile_payload(row) if row else None
 
     def get_room_snapshot(self, room_id: str) -> dict | None:
-        room = self.conn.execute("SELECT * FROM rooms WHERE id = ?", (room_id,)).fetchone()
-        if not room:
-            return None
-
-        self.set_current_room(room_id)
-
-        active = self.conn.execute(
-            """
-            SELECT *
-            FROM room_participants
-            WHERE room_id = ? AND status = 'active'
-            ORDER BY position ASC, created_at ASC
-            """,
-            (room_id,),
-        ).fetchall()
-        benched = self.conn.execute(
-            """
-            SELECT *
-            FROM room_participants
-            WHERE room_id = ? AND status = 'benched'
-            ORDER BY updated_at DESC, created_at ASC
-            """,
-            (room_id,),
-        ).fetchall()
-
-        current_session = None
-        if room["current_session_id"]:
-            current_session = self.conn.execute(
-                "SELECT * FROM sessions WHERE id = ?",
-                (room["current_session_id"],),
-            ).fetchone()
-        if not current_session:
-            current_session = self.conn.execute(
-                """
-                SELECT *
-                FROM sessions
-                WHERE room_id = ?
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """,
-                (room_id,),
-            ).fetchone()
-
-        messages = []
-        observer_reviews = []
-        pinned_messages = []
-        if current_session:
-            message_rows = self.conn.execute(
-                """
-                SELECT payload_json
-                FROM messages
-                WHERE session_id = ?
-                ORDER BY created_at ASC
-                LIMIT 300
-                """,
-                (current_session["id"],),
-            ).fetchall()
-            pinned_lookup = {item.get("id") for item in self.list_pinned_messages(current_session["id"])}
-            messages = []
-            for row in message_rows:
-                payload = loads_json(row["payload_json"], {})
-                payload["pinned"] = payload.get("id") in pinned_lookup
-                messages.append(payload)
-            pinned_messages = self.list_pinned_messages(current_session["id"])
-
-            review_rows = self.conn.execute(
-                """
-                SELECT *
-                FROM observer_reviews
-                WHERE session_id = ?
-                ORDER BY round_number DESC
-                LIMIT 12
-                """,
-                (current_session["id"],),
-            ).fetchall()
-            observer_reviews = [
-                {
-                    "id": review["id"],
-                    "roundNumber": review["round_number"],
-                    "summary": review["summary"],
-                    "recommendation": review["recommendation"],
-                    "chronicleAfter": review["chronicle_after"],
-                    "comments": loads_json(review["comments_json"], {}),
-                    "achievements": loads_json(review["achievements_json"], []),
-                    "statsDelta": loads_json(review["stats_delta_json"], {}),
-                    "progress": loads_json(review["progress_json"], {}),
-                    "finalReason": review["final_reason"],
-                    "missingExpertHint": review["missing_expert_hint"],
-                }
-                for review in review_rows
-            ]
-
-        return {
-            "room": {
-                "id": room["id"],
-                "name": room["name"],
-                "observerMode": room["observer_mode"],
-                "densityMode": room["density_mode"],
-                "observerProvider": room["observer_provider"],
-                "observerModel": room["observer_model"],
-                "summary": room["summary"],
-                "lastTopic": room["last_topic"],
-            },
-            "participants": {
-                "active": [self._participant_payload(row) for row in active],
-                "benched": [self._participant_payload(row) for row in benched],
-            },
-            "inventory": self.list_saved_profiles(),
-            "teamPresets": self.list_team_presets(),
-            "session": self._session_payload(current_session) if current_session else None,
-            "messages": messages,
-            "pinnedMessages": pinned_messages,
-            "observerReviews": observer_reviews,
-        }
+        return self._aggregates.build_room_snapshot(room_id)
 
     def list_room_sessions(self, room_id: str, query: str = "", limit: int = 80) -> list[dict]:
         search = (query or "").strip()
@@ -852,100 +778,7 @@ class Repository:
         return result
 
     def get_session_snapshot(self, session_id: str, *, make_current: bool = False) -> dict | None:
-        session = self.conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        if not session:
-            return None
-        room_id = session["room_id"]
-        room = self.conn.execute("SELECT * FROM rooms WHERE id = ?", (room_id,)).fetchone()
-        if not room:
-            return None
-        if make_current:
-            self.set_current_room(room_id)
-            self.update_room_settings(room_id, current_session_id=session_id, last_topic=session["topic"])
-
-        active = self.conn.execute(
-            """
-            SELECT *
-            FROM room_participants
-            WHERE room_id = ? AND status = 'active'
-            ORDER BY position ASC, created_at ASC
-            """,
-            (room_id,),
-        ).fetchall()
-        benched = self.conn.execute(
-            """
-            SELECT *
-            FROM room_participants
-            WHERE room_id = ? AND status = 'benched'
-            ORDER BY updated_at DESC, created_at ASC
-            """,
-            (room_id,),
-        ).fetchall()
-        message_rows = self.conn.execute(
-            """
-            SELECT payload_json
-            FROM messages
-            WHERE session_id = ?
-            ORDER BY created_at ASC
-            LIMIT 800
-            """,
-            (session_id,),
-        ).fetchall()
-        review_rows = self.conn.execute(
-            """
-            SELECT *
-            FROM observer_reviews
-            WHERE session_id = ?
-            ORDER BY round_number DESC
-            LIMIT 24
-            """,
-            (session_id,),
-        ).fetchall()
-        pinned_messages = self.list_pinned_messages(session_id)
-        pinned_lookup = {item.get("id") for item in pinned_messages}
-        messages = []
-        for row in message_rows:
-            payload = loads_json(row["payload_json"], {})
-            payload["pinned"] = payload.get("id") in pinned_lookup
-            messages.append(payload)
-
-        return {
-            "room": {
-                "id": room["id"],
-                "name": room["name"],
-                "observerMode": room["observer_mode"],
-                "densityMode": room["density_mode"],
-                "observerProvider": room["observer_provider"],
-                "observerModel": room["observer_model"],
-                "summary": room["summary"],
-                "lastTopic": room["last_topic"],
-            },
-            "participants": {
-                "active": [self._participant_payload(row) for row in active],
-                "benched": [self._participant_payload(row) for row in benched],
-            },
-            "inventory": self.list_saved_profiles(),
-            "teamPresets": self.list_team_presets(),
-            "session": self._session_payload(session),
-            "messages": messages,
-            "pinnedMessages": pinned_messages,
-            "observerReviews": [
-                {
-                    "id": review["id"],
-                    "roundNumber": review["round_number"],
-                    "summary": review["summary"],
-                    "recommendation": review["recommendation"],
-                    "chronicleAfter": review["chronicle_after"],
-                    "comments": loads_json(review["comments_json"], {}),
-                    "achievements": loads_json(review["achievements_json"], []),
-                    "statsDelta": loads_json(review["stats_delta_json"], {}),
-                    "progress": loads_json(review["progress_json"], {}),
-                    "finalReason": review["final_reason"],
-                    "missingExpertHint": review["missing_expert_hint"],
-                }
-                for review in review_rows
-            ],
-        }
+        return self._aggregates.build_session_snapshot(session_id, make_current=make_current)
 
     def set_current_session(self, session_id: str) -> dict | None:
         snapshot = self.get_session_snapshot(session_id, make_current=True)
@@ -954,15 +787,40 @@ class Repository:
     def rename_session(self, session_id: str, title: str):
         self.update_session(session_id, {"title": title.strip()})
 
+    def _delete_related_session_data(self, session_ids: list[str]):
+        if not session_ids:
+            return
+        placeholders = ",".join("?" for _ in session_ids)
+        cur = self.conn.cursor()
+        cur.execute(
+            f"""
+            DELETE FROM fact_check_claims
+            WHERE run_id IN (
+                SELECT id
+                FROM fact_check_runs
+                WHERE session_id IN ({placeholders})
+            )
+            """,
+            session_ids,
+        )
+        for table in (
+            "fact_check_runs",
+            "observer_reviews",
+            "reports",
+            "session_insights",
+            "planned_events",
+            "messages",
+            "rounds",
+            "room_events",
+        ):
+            cur.execute(f"DELETE FROM {table} WHERE session_id IN ({placeholders})", session_ids)
+
     def delete_session(self, session_id: str):
         session = self.conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if not session:
             return
         room_id = session["room_id"]
-        self.conn.execute("DELETE FROM observer_reviews WHERE session_id = ?", (session_id,))
-        self.conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-        self.conn.execute("DELETE FROM rounds WHERE session_id = ?", (session_id,))
-        self.conn.execute("DELETE FROM room_events WHERE session_id = ?", (session_id,))
+        self._delete_related_session_data([session_id])
         self.conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
 
         room = self.conn.execute("SELECT current_session_id FROM rooms WHERE id = ?", (room_id,)).fetchone()
@@ -989,64 +847,7 @@ class Repository:
         self.conn.commit()
 
     def export_session_markdown(self, session_id: str) -> str | None:
-        snapshot = self.get_session_snapshot(session_id, make_current=False)
-        if not snapshot or not snapshot["session"]:
-            return None
-        session = snapshot["session"]
-        room = snapshot["room"]
-        title = session.get("title") or session["topic"] or "Сессия"
-        lines = [
-            f"# {title}",
-            "",
-            f"- Комната: {room['name']}",
-            f"- Статус: {session['status']}",
-            f"- Раундов: {session['lastRoundNumber']}",
-            f"- Старт: {session.get('startedAt') or session.get('createdAt') or ''}",
-            f"- Финал: {session.get('endedAt') or 'не завершена'}",
-            "",
-            "## Тема",
-            "",
-            session["topic"],
-            "",
-        ]
-        if session.get("chronicle"):
-            lines.extend(["## Хроника", "", session["chronicle"], ""])
-        if snapshot.get("pinnedMessages"):
-            lines.extend(["## Зацепки", ""])
-            for item in snapshot["pinnedMessages"]:
-                name = item.get("name") or item.get("agent_name") or "Участник"
-                lines.extend([f"- **{name}:** {item.get('content', '').strip()}"])
-            lines.append("")
-        lines.extend(["## Ход беседы", ""])
-
-        current_round = None
-        for message in snapshot["messages"]:
-            round_number = message.get("round")
-            if round_number and round_number != current_round:
-                current_round = round_number
-                lines.extend([f"### Раунд {current_round}", ""])
-            if message.get("type") == "round":
-                continue
-            name = message.get("name") or message.get("agent_name") or "Система"
-            role = message.get("role")
-            specialty = message.get("specialty")
-            meta = f" ({role} · {specialty})" if role and specialty else ""
-            content = (message.get("content") or "").strip()
-            if content:
-                lines.extend([f"**{name}{meta}:**", "", content, ""])
-
-        if snapshot["observerReviews"]:
-            lines.extend(["## Заметки Хрономанта", ""])
-            for review in reversed(snapshot["observerReviews"]):
-                lines.extend([
-                    f"### Раунд {review['roundNumber']}",
-                    "",
-                    review.get("summary") or "",
-                    "",
-                ])
-                if review.get("finalReason"):
-                    lines.extend([f"_Причина финала:_ {review['finalReason']}", ""])
-        return "\n".join(lines).strip() + "\n"
+        return self._aggregates.export_session_markdown(session_id)
 
     def create_session_from_final(self, source_session_id: str) -> dict | None:
         source = self.conn.execute("SELECT * FROM sessions WHERE id = ?", (source_session_id,)).fetchone()
@@ -1064,10 +865,10 @@ class Repository:
         self.conn.execute(
             """
             INSERT INTO sessions (
-                id, room_id, title, topic, status, observer_mode, chronicle, wrap_requested,
+                id, room_id, title, topic, status, observer_mode, observer_provider, observer_model, chronicle, wrap_requested,
                 final_requested, final_round_planned, extension_count, last_round_number,
                 created_at, updated_at, started_at, ended_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -1076,6 +877,8 @@ class Repository:
                 source["topic"],
                 "paused",
                 source["observer_mode"],
+                source["observer_provider"],
+                source["observer_model"],
                 next_chronicle,
                 0,
                 0,
@@ -1099,10 +902,23 @@ class Repository:
             """
             INSERT INTO rooms (
                 id, name, observer_mode, density_mode, observer_provider, observer_model,
-                current_session_id, summary, last_topic, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                current_session_id, summary, last_topic, settings_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (room_id, name, observer_mode, density_mode, observer_provider, observer_model, None, "", "", now, now),
+            (
+                room_id,
+                name,
+                observer_mode,
+                density_mode,
+                observer_provider,
+                observer_model,
+                None,
+                "",
+                "",
+                dumps_json({"internet_mode": "auto"}),
+                now,
+                now,
+            ),
         )
         self.conn.commit()
         self.set_current_room(room_id)
@@ -1119,14 +935,11 @@ class Repository:
         cur = self.conn.cursor()
         session_rows = cur.execute("SELECT id FROM sessions WHERE room_id = ?", (room_id,)).fetchall()
         session_ids = [row["id"] for row in session_rows]
-        if session_ids:
-            placeholders = ",".join("?" for _ in session_ids)
-            cur.execute(f"DELETE FROM messages WHERE session_id IN ({placeholders})", session_ids)
-            cur.execute(f"DELETE FROM rounds WHERE session_id IN ({placeholders})", session_ids)
-            cur.execute(f"DELETE FROM observer_reviews WHERE session_id IN ({placeholders})", session_ids)
-            cur.execute(f"DELETE FROM room_events WHERE session_id IN ({placeholders})", session_ids)
+        self._delete_related_session_data(session_ids)
         cur.execute("DELETE FROM sessions WHERE room_id = ?", (room_id,))
+        cur.execute("DELETE FROM session_insights WHERE room_id = ?", (room_id,))
         cur.execute("DELETE FROM room_events WHERE room_id = ?", (room_id,))
+        cur.execute("DELETE FROM planned_events WHERE room_id = ?", (room_id,))
         cur.execute("DELETE FROM room_participants WHERE room_id = ?", (room_id,))
         cur.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
         self.conn.commit()
@@ -1183,6 +996,7 @@ class Repository:
             "mascot": "mascot",
             "summary": "summary",
             "lastNote": "last_note",
+            "memoryGraphId": "memory_graph_id",
             "isSaved": "is_saved",
             "systemProvided": "system_provided",
         }
@@ -1369,7 +1183,20 @@ class Repository:
                 {"status": "active", "position": self._next_active_position(row["room_id"])},
             )
 
-    def update_room_settings(self, room_id: str, *, name: str | None = None, observer_mode: str | None = None, density_mode: str | None = None, observer_provider: str | None = None, observer_model: str | None = None, summary: str | None = None, last_topic: str | None = None, current_session_id: str | None = None):
+    def update_room_settings(
+        self,
+        room_id: str,
+        *,
+        name: str | None = None,
+        observer_mode: str | None = None,
+        density_mode: str | None = None,
+        observer_provider: str | None = None,
+        observer_model: str | None = None,
+        settings: dict | None = None,
+        summary: str | None = None,
+        last_topic: str | None = None,
+        current_session_id: str | None = None,
+    ):
         updates = []
         values: list[object] = []
         if name is not None:
@@ -1387,6 +1214,9 @@ class Repository:
         if observer_model is not None:
             updates.append("observer_model = ?")
             values.append(observer_model)
+        if settings is not None:
+            updates.append("settings_json = ?")
+            values.append(dumps_json(self._normalize_room_settings(settings)))
         if summary is not None:
             updates.append("summary = ?")
             values.append(summary)
@@ -1408,13 +1238,17 @@ class Repository:
     def create_session(self, room_id: str, topic: str, observer_mode: str) -> dict:
         now = utc_now()
         session_id = make_id("session")
+        room = self.conn.execute(
+            "SELECT observer_provider, observer_model FROM rooms WHERE id = ?",
+            (room_id,),
+        ).fetchone()
         self.conn.execute(
             """
             INSERT INTO sessions (
-                id, room_id, title, topic, status, observer_mode, chronicle, wrap_requested,
+                id, room_id, title, topic, status, observer_mode, observer_provider, observer_model, chronicle, wrap_requested,
                 final_requested, final_round_planned, extension_count, last_round_number,
                 created_at, updated_at, started_at, ended_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -1423,6 +1257,8 @@ class Repository:
                 topic,
                 "running",
                 observer_mode,
+                room["observer_provider"] if room else None,
+                room["observer_model"] if room else None,
                 "",
                 0,
                 0,
@@ -1442,13 +1278,17 @@ class Repository:
     def create_session_with_seed(self, room_id: str, topic: str, observer_mode: str, chronicle: str, status: str = "paused", title: str = "") -> dict:
         now = utc_now()
         session_id = make_id("session")
+        room = self.conn.execute(
+            "SELECT observer_provider, observer_model FROM rooms WHERE id = ?",
+            (room_id,),
+        ).fetchone()
         self.conn.execute(
             """
             INSERT INTO sessions (
-                id, room_id, title, topic, status, observer_mode, chronicle, wrap_requested,
+                id, room_id, title, topic, status, observer_mode, observer_provider, observer_model, chronicle, wrap_requested,
                 final_requested, final_round_planned, extension_count, last_round_number,
                 created_at, updated_at, started_at, ended_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -1457,6 +1297,8 @@ class Repository:
                 topic,
                 status,
                 observer_mode,
+                room["observer_provider"] if room else None,
+                room["observer_model"] if room else None,
                 chronicle,
                 0,
                 0,
@@ -1494,6 +1336,8 @@ class Repository:
             "topic": "topic",
             "status": "status",
             "observerMode": "observer_mode",
+            "observerProvider": "observer_provider",
+            "observerModel": "observer_model",
             "chronicle": "chronicle",
             "wrapRequested": "wrap_requested",
             "finalRequested": "final_requested",
@@ -1592,14 +1436,26 @@ class Repository:
             """
             SELECT payload_json
             FROM messages
-            WHERE session_id = ? AND round_number = ? AND author_type IN ('agent', 'user')
+            WHERE session_id = ? AND round_number = ? AND author_type IN ('agent', 'user', 'system_event')
             ORDER BY created_at ASC
             """,
             (session_id, round_number),
         ).fetchall()
         return [loads_json(row["payload_json"], {}) for row in rows]
 
-    def list_session_messages(self, session_id: str, limit: int = 60) -> list[dict]:
+    def list_session_messages(self, session_id: str, limit: int | None = 60) -> list[dict]:
+        if limit is None:
+            rows = self.conn.execute(
+                """
+                SELECT payload_json
+                FROM messages
+                WHERE session_id = ?
+                ORDER BY created_at ASC
+                """,
+                (session_id,),
+            ).fetchall()
+            return [loads_json(row["payload_json"], {}) for row in rows]
+
         rows = self.conn.execute(
             """
             SELECT payload_json
@@ -1611,6 +1467,125 @@ class Repository:
             (session_id, limit),
         ).fetchall()
         return [loads_json(row["payload_json"], {}) for row in reversed(rows)]
+
+    def create_planned_event(
+        self,
+        room_id: str,
+        target_round: int,
+        description: str,
+        session_id: str | None = None,
+    ) -> dict:
+        event_id = make_id("pevt")
+        now = utc_now()
+        self.conn.execute(
+            """
+            INSERT INTO planned_events (
+                id, room_id, session_id, target_round, description, created_at, fired_at
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (event_id, room_id, session_id, int(target_round), description.strip(), now),
+        )
+        self.conn.commit()
+        row = self.conn.execute("SELECT * FROM planned_events WHERE id = ?", (event_id,)).fetchone()
+        return self._planned_event_payload(row)
+
+    def list_planned_events(
+        self,
+        room_id: str,
+        session_id: str | None = None,
+        *,
+        include_fired: bool = True,
+    ) -> list[dict]:
+        params: list[object] = [room_id]
+        where = "WHERE room_id = ?"
+        if session_id:
+            where += " AND (session_id = ? OR session_id IS NULL)"
+            params.append(session_id)
+        if not include_fired:
+            where += " AND fired_at IS NULL"
+
+        rows = self.conn.execute(
+            f"""
+            SELECT *
+            FROM planned_events
+            {where}
+            ORDER BY
+                CASE WHEN fired_at IS NULL THEN 0 ELSE 1 END,
+                target_round ASC,
+                created_at ASC
+            """,
+            params,
+        ).fetchall()
+        return [self._planned_event_payload(row) for row in rows]
+
+    def get_planned_event(self, room_id: str, event_id: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM planned_events WHERE room_id = ? AND id = ?",
+            (room_id, event_id),
+        ).fetchone()
+        return self._planned_event_payload(row) if row else None
+
+    def update_planned_event(self, room_id: str, event_id: str, fields: dict) -> dict | None:
+        allowed = {
+            "targetRound": ("target_round", int),
+            "target_round": ("target_round", int),
+            "description": ("description", lambda value: str(value).strip()),
+            "sessionId": ("session_id", lambda value: value),
+            "session_id": ("session_id", lambda value: value),
+        }
+        updates = []
+        values: list[object] = []
+        for key, value in fields.items():
+            if key not in allowed:
+                continue
+            column, caster = allowed[key]
+            if column == "description" and not str(value).strip():
+                continue
+            updates.append(f"{column} = ?")
+            values.append(caster(value))
+
+        if not updates:
+            return self.get_planned_event(room_id, event_id)
+
+        values.extend([room_id, event_id])
+        self.conn.execute(
+            f"UPDATE planned_events SET {', '.join(updates)} WHERE room_id = ? AND id = ?",
+            values,
+        )
+        self.conn.commit()
+        return self.get_planned_event(room_id, event_id)
+
+    def delete_planned_event(self, room_id: str, event_id: str) -> bool:
+        cur = self.conn.execute(
+            "DELETE FROM planned_events WHERE room_id = ? AND id = ?",
+            (room_id, event_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def get_pending_events(self, room_id: str, session_id: str | None, target_round: int) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT *
+            FROM planned_events
+            WHERE room_id = ?
+              AND target_round = ?
+              AND fired_at IS NULL
+              AND (session_id = ? OR session_id IS NULL)
+            ORDER BY created_at ASC
+            """,
+            (room_id, int(target_round), session_id),
+        ).fetchall()
+        return [self._planned_event_payload(row) for row in rows]
+
+    def mark_event_fired(self, event_id: str) -> dict | None:
+        self.conn.execute(
+            "UPDATE planned_events SET fired_at = ? WHERE id = ? AND fired_at IS NULL",
+            (utc_now(), event_id),
+        )
+        self.conn.commit()
+        row = self.conn.execute("SELECT * FROM planned_events WHERE id = ?", (event_id,)).fetchone()
+        return self._planned_event_payload(row) if row else None
 
     def add_room_event(self, room_id: str, session_id: str | None, event_type: str, payload: dict):
         self.conn.execute(
@@ -1649,8 +1624,8 @@ class Repository:
                 id, room_id, session_id, round_id, round_number, summary,
                 chronicle_before, chronicle_after, recommendation, suggested_rounds_left,
                 comments_json, achievements_json, stats_delta_json, progress_json, final_reason,
-                missing_expert_hint, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                missing_expert_hint, roster_advice_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 make_id("review"),
@@ -1669,10 +1644,89 @@ class Repository:
                 dumps_json(review.get("progress", {})),
                 review.get("finalReason", ""),
                 review.get("missingExpertHint", ""),
+                dumps_json(review.get("rosterAdvice", {})),
                 utc_now(),
             ),
         )
         self.conn.commit()
+
+    def get_observer_reviews(self, session_id: str) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT *
+            FROM observer_reviews
+            WHERE session_id = ?
+            ORDER BY round_number ASC
+            """,
+            (session_id,),
+        ).fetchall()
+        return [self._observer_review_payload(row) for row in rows]
+
+    def save_session_insight(self, insight: dict) -> dict | None:
+        return self._aggregates.save_session_insight(insight)
+
+    def list_session_insights(
+        self,
+        *,
+        room_id: str | None = None,
+        observer_provider: str | None = None,
+        observer_model: str | None = None,
+        limit: int = 80,
+    ) -> list[dict]:
+        return self._aggregates.list_session_insights(
+            room_id=room_id,
+            observer_provider=observer_provider,
+            observer_model=observer_model,
+            limit=limit,
+        )
+
+    def get_fact_check_run(self, run_id: str, *, include_claims: bool = True) -> dict | None:
+        return self._aggregates.get_fact_check_run(run_id, include_claims=include_claims)
+
+    def get_latest_fact_check_run(self, session_id: str, *, include_claims: bool = True) -> dict | None:
+        return self._aggregates.get_latest_fact_check_run(session_id, include_claims=include_claims)
+
+    def find_reusable_fact_check_run(self, session_id: str, scope: str, target_round: int | None) -> dict | None:
+        return self._aggregates.find_reusable_fact_check_run(session_id, scope, target_round)
+
+    def create_fact_check_run(
+        self,
+        *,
+        room_id: str,
+        session_id: str,
+        scope: str,
+        target_round: int | None,
+        internet_mode: str,
+        provider: str | None,
+        model: str | None,
+    ) -> dict:
+        return self._aggregates.create_fact_check_run(
+            room_id=room_id,
+            session_id=session_id,
+            scope=scope,
+            target_round=target_round,
+            internet_mode=internet_mode,
+            provider=provider,
+            model=model,
+        )
+
+    def update_fact_check_run(self, run_id: str, **fields) -> dict | None:
+        return self._aggregates.update_fact_check_run(run_id, **fields)
+
+    def replace_fact_check_claims(self, run_id: str, claims: list[dict]) -> list[dict]:
+        return self._aggregates.replace_fact_check_claims(run_id, claims)
+
+    def get_model_reliability(self, provider: str, model: str) -> dict | None:
+        return self._aggregates.get_model_reliability(provider, model)
+
+    def apply_model_reliability_rollup(self, claims: list[dict]) -> list[dict]:
+        return self._aggregates.apply_model_reliability_rollup(claims)
+
+    def save_report(self, session_id: str, room_id: str | None, markdown: str, sections: list[dict], provider: str | None, model: str | None) -> dict:
+        return self._aggregates.save_report(session_id, room_id, markdown, sections, provider, model)
+
+    def get_latest_report(self, session_id: str) -> dict | None:
+        return self._aggregates.get_latest_report(session_id)
 
     def apply_stats_delta(self, stats_delta: dict, comments: dict):
         for profile_id, delta in stats_delta.items():

@@ -56,6 +56,7 @@ DEFAULT_PROFILES = [
 ]
 
 FAST_OLLAMA_CLOUD_MODELS = [
+    "gemma4:31b-cloud",
     "gemini-3-flash-preview:cloud",
     "qwen3.5:cloud",
     "glm-5:cloud",
