@@ -39,6 +39,10 @@
   --ticker-border: var(--cyan);
   --ticker-glow: rgba(0, 240, 240, 0.12);
   --ui-font-scale: 1;
+  /* Дизайн-токены типографики: база × масштаб с полом читаемости (ноутбуки 14"). */
+  --fs-meta: max(calc(8px * var(--ui-font-scale)), 9px);
+  --fs-name: max(calc(7px * var(--ui-font-scale)), 10px);
+  --fs-heading: max(calc(8px * var(--ui-font-scale)), 10px);
   --control-chip-bg: rgba(255, 255, 255, 0.04);
   --control-chip-border: var(--border);
   --control-chip-text: var(--muted);
@@ -4550,51 +4554,51 @@ body.is-resizing-chat * {
    Сгенерировано по аудиту: 39 правил имели кегль 6–8px.
    ============================================================ */
 .agent-info-btn {
-  font-size: max(6px, 9px);
+  font-size: var(--fs-meta);
   min-height: 24px;
   min-width: 24px;
 }
 
 .agent-nametag {
-  font-size: max(7px, 9px);
+  font-size: var(--fs-name);
 }
 
-.assistant-topic-label { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
-.character-name { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.chat-fact-check-title { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.chat-header { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.chat-msg-name { font-size: max(calc(7px * var(--ui-font-scale)), 10px); }
-.chat-msg-round { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
-.chat-reaction-tag { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
-.chat-report-btn { font-size: max(calc(7px * var(--ui-font-scale)), 9px); min-height: 24px; }
-.chat-report-kicker { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
-.chat-report-markdown h3 { font-size: max(calc(8px * var(--ui-font-scale)), 10px); }
-.chat-report-title { font-size: max(calc(8px * var(--ui-font-scale)), 10px); }
-.chat-round-badge { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.documents-delete-btn { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
-.documents-panel-toggle { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.dossier-achievement-round { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
-.dossier-stat-label { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.drawer-kicker { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
-.empty-state { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.event-card-round { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
-.event-delete { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; min-width: 24px; }
-.expertise-toggle { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
-.header-exit-btn { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
-.internet-settings-title { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.observer-banner-title { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.observer-decision-head { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.observer-roster-title { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.pixel-btn.add { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
-.planned-events-toggle { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
-.preset-panel-title { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.builder-title { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.preset-panel-toggle { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
-.provider-preset-label { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.scene-zoom-title { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
-.theme-switcher span { font-size: max(calc(8px * var(--ui-font-scale)), 9px); }
-.ui-font-title { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
-.ui-font-toggle { font-size: max(calc(8px * var(--ui-font-scale)), 9px); min-height: 24px; }
+.assistant-topic-label { font-size: var(--fs-meta); }
+.character-name { font-size: var(--fs-meta); }
+.chat-fact-check-title { font-size: var(--fs-meta); }
+.chat-header { font-size: var(--fs-meta); }
+.chat-msg-name { font-size: var(--fs-name); }
+.chat-msg-round { font-size: var(--fs-meta); }
+.chat-reaction-tag { font-size: var(--fs-meta); }
+.chat-report-btn { font-size: var(--fs-meta); min-height: 24px; }
+.chat-report-kicker { font-size: var(--fs-meta); }
+.chat-report-markdown h3 { font-size: var(--fs-heading); }
+.chat-report-title { font-size: var(--fs-heading); }
+.chat-round-badge { font-size: var(--fs-meta); }
+.documents-delete-btn { font-size: var(--fs-meta); min-height: 24px; }
+.documents-panel-toggle { font-size: var(--fs-meta); }
+.dossier-achievement-round { font-size: var(--fs-meta); }
+.dossier-stat-label { font-size: var(--fs-meta); }
+.drawer-kicker { font-size: var(--fs-meta); }
+.empty-state { font-size: var(--fs-meta); }
+.event-card-round { font-size: var(--fs-meta); }
+.event-delete { font-size: var(--fs-meta); min-height: 24px; min-width: 24px; }
+.expertise-toggle { font-size: var(--fs-meta); min-height: 24px; }
+.header-exit-btn { font-size: var(--fs-meta); min-height: 24px; }
+.internet-settings-title { font-size: var(--fs-meta); }
+.observer-banner-title { font-size: var(--fs-heading); }
+.observer-decision-head { font-size: var(--fs-meta); }
+.observer-roster-title { font-size: var(--fs-meta); }
+.pixel-btn.add { font-size: var(--fs-meta); min-height: 24px; }
+.planned-events-toggle { font-size: var(--fs-meta); min-height: 24px; }
+.preset-panel-title { font-size: var(--fs-heading); }
+.builder-title { font-size: var(--fs-heading); }
+.preset-panel-toggle { font-size: var(--fs-meta); min-height: 24px; }
+.provider-preset-label { font-size: var(--fs-meta); }
+.scene-zoom-title { font-size: var(--fs-meta); }
+.theme-switcher span { font-size: var(--fs-meta); }
+.ui-font-title { font-size: var(--fs-meta); }
+.ui-font-toggle { font-size: var(--fs-meta); min-height: 24px; }
 .mascot-snooze span:nth-child(2),
 .mascot-snooze span:nth-child(3) { font-size: max(calc(7px * var(--ui-font-scale)), 9px); }
 
