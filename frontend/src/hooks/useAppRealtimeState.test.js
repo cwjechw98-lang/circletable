@@ -176,4 +176,23 @@ describe('useAppRealtimeState', () => {
 
     vi.unstubAllGlobals()
   })
+
+  it('acknowledges user questions and announces round completion', () => {
+    const { result } = renderHook(() => useAppRealtimeState({}))
+
+    act(() => {
+      capturedHandler({
+        type: 'user_question_accepted',
+        message: { id: 'q-1', type: 'user_question', content: 'Почему?' },
+      })
+    })
+    act(() => {
+      capturedHandler({ type: 'round_completed', round: 2, summary: 'сошлись на пилоте' })
+    })
+
+    const messages = result.current.state.session.messages
+    expect(messages.some((m) => m.type === 'status' && m.content.includes('Вопрос доставлен'))).toBe(true)
+    const roundNote = messages.find((m) => String(m.id).startsWith('round-done-'))
+    expect(roundNote.content).toBe('Раунд 2 завершён — сошлись на пилоте')
+  })
 })

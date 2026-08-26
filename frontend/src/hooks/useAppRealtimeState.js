@@ -421,6 +421,25 @@ export default function useAppRealtimeState({
         }))
         break
 
+      case 'user_question_accepted':
+        // Подтверждение доставки вопроса до вставки самого вопроса.
+        setMessages((prev) => [...prev, {
+          id: `ack-${data.message?.id || Date.now()}`,
+          type: 'status',
+          content: 'Вопрос доставлен участникам стола.',
+        }])
+        break
+
+      case 'round_completed': {
+        const summary = String(data.summary || '').trim()
+        setMessages((prev) => [...prev, {
+          id: `round-done-${data.round || prev.length}-${Date.now()}`,
+          type: 'status',
+          content: summary ? `Раунд ${data.round} завершён — ${summary}` : `Раунд ${data.round} завершён.`,
+        }])
+        break
+      }
+
       case 'agent_message':
       case 'status':
       case 'user_question':
@@ -549,7 +568,6 @@ export default function useAppRealtimeState({
         break
 
       case 'report_error':
-      case 'report_failed':
         if (data.session_id && currentSessionIdRef.current && data.session_id !== currentSessionIdRef.current) {
           break
         }
