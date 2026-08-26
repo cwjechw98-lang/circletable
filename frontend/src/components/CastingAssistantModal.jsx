@@ -1,28 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { MASCOT_DEFS, MASCOT_LABELS } from './Mascot.jsx'
+import PixelSprite from './PixelSprite.jsx'
 import { ROLE_OPTIONS, getRoleLabel } from '../constants/roles.js'
-import { SPECIALTY_GROUPS, getSpecialtyLabel } from '../constants/specialties.js'
+import { buildSpecialtyLabels, getSpecialtyLabel, getSpecialtyValues, mergeSpecialtyGroups } from '../constants/specialties.js'
+import { getModelOptions } from '../constants/models.js'
 
 const ROLE_VALUES = new Set(ROLE_OPTIONS.map((role) => role.value))
-const SPECIALTY_VALUES = new Set(
-  SPECIALTY_GROUPS.flatMap((group) => group.options.map((specialty) => specialty.value)),
-)
 const MASCOT_VALUES = new Set(Object.keys(MASCOT_DEFS))
-const EMBEDDING_MARKERS = ['embed', 'embedding', 'nomic-embed', 'text-embedding', 'bge', 'e5']
 
-function isEmbeddingModel(model) {
-  const lower = (model || '').toLowerCase()
-  return EMBEDDING_MARKERS.some((marker) => lower.includes(marker))
-}
-
-function usableModels(providers, providerName) {
-  const models = providers?.[providerName]?.models || []
-  const filtered = models.filter((model) => !isEmbeddingModel(model))
-  return filtered.length > 0 ? filtered : models
-}
-
-function renderSpecialtyOptions() {
-  return SPECIALTY_GROUPS.map((group) => (
+function renderSpecialtyOptions(groups) {
+  return groups.map((group) => (
     <optgroup key={group.label} label={group.label}>
       {group.options.map((specialty) => (
         <option key={specialty.value} value={specialty.value}>
@@ -40,26 +27,30 @@ function formatMascotLabel(mascot) {
 
 function buildParticipantLine(participant) {
   const roleLabel = getRoleLabel(participant?.role) || participant?.role || 'Участник'
-  const specialtyLabel = getSpecialtyLabel(participant?.specialty) || participant?.specialty || 'Без профиля'
+  const specialtyLabel = getSpecialtyLabel(participant?.specialty, participant?.specialtyLabel) || participant?.specialty || 'Без профиля'
   return `${participant?.name || 'Безымянный'} — ${roleLabel}, ${specialtyLabel}`
 }
 
-function normalizeDraft(draft, index, fallbackProvider = 'ollama', fallbackModel = '') {
+function normalizeDraft(draft, index, fallbackProvider = 'ollama', fallbackModel = '', specialtyValues = getSpecialtyValues()) {
   const mascot = MASCOT_VALUES.has(draft?.mascot) ? draft.mascot : 'wizard'
   const role = ROLE_VALUES.has(draft?.role) ? draft.role : 'analyst'
-  const specialty = SPECIALTY_VALUES.has(draft?.specialty) ? draft.specialty : 'digital-generalist'
+  const specialty = specialtyValues.has(draft?.specialty) ? draft.specialty : 'digital-generalist'
 
   return {
     id: draft?.id || `draft-${Date.now()}-${index}`,
     name: String(draft?.name || `Герой ${index + 1}`).trim(),
     role,
     specialty,
+    specialtyLabel: draft?.specialtyLabel || '',
     provider: draft?.provider || fallbackProvider,
     model: draft?.model || fallbackModel,
     mascot,
     emoji: MASCOT_DEFS[mascot]?.emoji || draft?.emoji || '🧙',
     summary: draft?.summary || '',
     lastNote: draft?.lastNote || 'Предложен кастинг-помощником под текущую задачу.',
+    whyRole: draft?.whyRole || '',
+    whyModel: draft?.whyModel || '',
+    memoryHint: draft?.memoryHint || '',
   }
 }
 
@@ -78,6 +69,7 @@ export default function CastingAssistantModal({
   assistantProvider,
   assistantModel,
   missingExpertHint,
+  customSpecialtyGroups = [],
   onAssistantChange,
   onClose,
   onAccept,
@@ -88,6 +80,9 @@ export default function CastingAssistantModal({
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [contextCollapsed, setContextCollapsed] = useState(false)
+  const [topicCollapsed, setTopicCollapsed] = useState(false)
+  const wasOpenRef = useRef(false)
+  const draftListRef = useRef(null)
 
   const trimmedTopic = topic.trim()
   const gapFill = mode === 'gap_fill'
@@ -100,8 +95,20 @@ export default function CastingAssistantModal({
     [providers],
   )
   const assistantModels = useMemo(
-    () => usableModels(providers, assistantProvider),
+    () => getModelOptions(assistantProvider, providers),
     [assistantProvider, providers],
+  )
+  const specialtyGroups = useMemo(
+    () => mergeSpecialtyGroups(customSpecialtyGroups),
+    [customSpecialtyGroups],
+  )
+  const specialtyValues = useMemo(
+    () => getSpecialtyValues(customSpecialtyGroups),
+    [customSpecialtyGroups],
+  )
+  const specialtyLabels = useMemo(
+    () => buildSpecialtyLabels(customSpecialtyGroups),
+    [customSpecialtyGroups],
   )
   const rosterPreview = useMemo(
     () => (activeParticipants || []).slice(0, 4).map(buildParticipantLine),
@@ -122,13 +129,29 @@ export default function CastingAssistantModal({
       setMessage('')
       setDrafts([])
       setContextCollapsed(false)
+      setTopicCollapsed(false)
+      wasOpenRef.current = false
       return
     }
 
-    if (drafts.length === 0) {
+    if (!wasOpenRef.current) {
+      const shouldCollapseTopic = trimmedTopic.length > 180
+        || gapFill
+        || (typeof window !== 'undefined' && window.innerWidth < 1500)
+      const shouldCollapseContext = gapFill
+        || activeCount > 4
+        || [roomSummary, sessionChronicle, latestRoundSummary, missingExpertHint]
+          .filter(Boolean)
+          .join(' ')
+          .length > 420
+        || (typeof window !== 'undefined' && window.innerWidth < 1500)
+
+      setTopicCollapsed(shouldCollapseTopic)
+      setContextCollapsed(shouldCollapseContext)
       setCount(gapFill ? 2 : 4)
+      wasOpenRef.current = true
     }
-  }, [drafts.length, gapFill, open])
+  }, [activeCount, gapFill, latestRoundSummary, missingExpertHint, open, roomSummary, sessionChronicle, trimmedTopic.length])
 
   const roleOptions = useMemo(() => ROLE_OPTIONS, [])
   const mascotOptions = useMemo(() => Object.keys(MASCOT_DEFS), [])
@@ -155,7 +178,7 @@ export default function CastingAssistantModal({
   }, [assistantModel, assistantModels, assistantProvider, model, onAssistantChange, open])
 
   function modelOptionsFor(providerName) {
-    return usableModels(providers, providerName)
+    return getModelOptions(providerName, providers)
   }
 
   function updateDraftProvider(index, nextProvider) {
@@ -209,8 +232,16 @@ export default function CastingAssistantModal({
         ...draft,
         provider: draft.provider || assistantProvider,
         model: draft.model || assistantModel,
-      }, index, assistantProvider, assistantModel))
+      }, index, assistantProvider, assistantModel, specialtyValues))
       setDrafts(nextDrafts)
+      if (nextDrafts.length > 0) {
+        setTopicCollapsed(true)
+        if (typeof window !== 'undefined') {
+          window.requestAnimationFrame(() => {
+            draftListRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+          })
+        }
+      }
       setContextCollapsed(true)
       setMessage(data.message || 'Черновик состава готов.')
     } catch (err) {
@@ -228,7 +259,10 @@ export default function CastingAssistantModal({
       if (patch.mascot) {
         merged.emoji = MASCOT_DEFS[patch.mascot]?.emoji || merged.emoji
       }
-      return normalizeDraft(merged, draftIndex)
+      if (patch.specialty) {
+        merged.specialtyLabel = specialtyLabels[patch.specialty] || ''
+      }
+      return normalizeDraft(merged, draftIndex, assistantProvider, assistantModel, specialtyValues)
     }))
   }
 
@@ -237,7 +271,7 @@ export default function CastingAssistantModal({
   }
 
   function acceptDrafts() {
-    onAccept(drafts.map((draft, index) => normalizeDraft(draft, index, assistantProvider, assistantModel)))
+    onAccept(drafts.map((draft, index) => normalizeDraft(draft, index, assistantProvider, assistantModel, specialtyValues)))
     onClose()
   }
 
@@ -259,10 +293,26 @@ export default function CastingAssistantModal({
         </div>
 
         <div className="assistant-topic-card">
-          <div className="assistant-topic-label">Текущая тема</div>
-          <div className="assistant-topic-text">
+          <div className="assistant-context-head">
+            <div className="assistant-topic-label">Текущая тема</div>
+            {trimmedTopic.length > 140 && (
+              <button
+                type="button"
+                className="assistant-context-toggle"
+                onClick={() => setTopicCollapsed((value) => !value)}
+              >
+                {topicCollapsed ? 'Развернуть' : 'Свернуть'}
+              </button>
+            )}
+          </div>
+          <div className={`assistant-topic-text${topicCollapsed ? ' is-collapsed' : ''}`}>
             {trimmedTopic || 'Тема пока не введена.'}
           </div>
+          {topicCollapsed && trimmedTopic.length > 140 && (
+            <div className="assistant-context-collapsed">
+              Тема свернута, чтобы варианты героев оставались видимыми.
+            </div>
+          )}
         </div>
 
         {hasContext && (
@@ -324,7 +374,7 @@ export default function CastingAssistantModal({
               onChange={(event) => setCount(Number(event.target.value))}
               disabled={loading}
             >
-              {[2, 3, 4, 5, 6, 7, 8].map((value) => (
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => (
                 <option key={value} value={value}>{value}</option>
               ))}
             </select>
@@ -347,20 +397,23 @@ export default function CastingAssistantModal({
             </select>
           </label>
 
-          <select
-            className="mini-select assistant-model-select"
-            value={assistantModel}
-            onChange={(event) => onAssistantChange({
-              provider: assistantProvider,
-              model: event.target.value,
-            })}
-            disabled={loading || assistantModels.length === 0}
-            data-hint="Эта модель придумывает состав персонажей."
-          >
-            {assistantModels.map((modelName) => (
-              <option key={modelName} value={modelName}>{modelName}</option>
-            ))}
-          </select>
+          <label className="assistant-count assistant-model-group">
+            Конкретная модель
+            <select
+              className="mini-select assistant-model-select"
+              value={assistantModel}
+              onChange={(event) => onAssistantChange({
+                provider: assistantProvider,
+                model: event.target.value,
+              })}
+              disabled={loading || assistantModels.length === 0}
+              data-hint="Эта модель придумывает состав персонажей."
+            >
+              {assistantModels.map((modelName) => (
+                <option key={modelName} value={modelName}>{modelName}</option>
+              ))}
+            </select>
+          </label>
 
           <button
             className="pixel-btn start"
@@ -387,7 +440,7 @@ export default function CastingAssistantModal({
           </div>
         )}
 
-        <div className="assistant-draft-list">
+        <div className="assistant-draft-list" ref={draftListRef}>
           {drafts.length === 0 && (
             <div className="drawer-empty">
               {gapFill
@@ -399,7 +452,7 @@ export default function CastingAssistantModal({
           {drafts.map((draft, index) => (
             <div key={draft.id} className="assistant-draft-card">
               <div className="assistant-draft-avatar">
-                {MASCOT_DEFS[draft.mascot]?.emoji || draft.emoji || '🧙'}
+                <PixelSprite mascot={draft.mascot} emotion="neutral" size={40} />
               </div>
 
               <div className="assistant-draft-fields">
@@ -425,7 +478,7 @@ export default function CastingAssistantModal({
                   value={draft.specialty}
                   onChange={(event) => updateDraft(index, { specialty: event.target.value })}
                 >
-                  {renderSpecialtyOptions()}
+                  {renderSpecialtyOptions(specialtyGroups)}
                 </select>
 
                 <select
@@ -470,8 +523,29 @@ export default function CastingAssistantModal({
                 />
 
                 <div className="assistant-draft-meta">
-                  {getRoleLabel(draft.role)} · {getSpecialtyLabel(draft.specialty)} · {draft.provider}/{draft.model || 'модель не выбрана'}
+                  {getRoleLabel(draft.role)} · {getSpecialtyLabel(draft.specialty, draft.specialtyLabel || specialtyLabels[draft.specialty])} · {draft.provider}/{draft.model || 'модель не выбрана'}
                 </div>
+
+                {(draft.whyRole || draft.whyModel || draft.memoryHint) && (
+                  <details className="assistant-why-block">
+                    <summary>Почему предложено</summary>
+                    {draft.whyRole && (
+                      <div className="assistant-why-line">
+                        <strong>Роль:</strong> {draft.whyRole}
+                      </div>
+                    )}
+                    {draft.whyModel && (
+                      <div className="assistant-why-line">
+                        <strong>Модель:</strong> {draft.whyModel}
+                      </div>
+                    )}
+                    {draft.memoryHint && (
+                      <div className="assistant-why-line">
+                        <strong>Память:</strong> {draft.memoryHint}
+                      </div>
+                    )}
+                  </details>
+                )}
               </div>
 
               <button className="pixel-btn danger" onClick={() => removeDraft(index)}>

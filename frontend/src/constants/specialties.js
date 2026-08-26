@@ -73,6 +73,59 @@ export const SPECIALTY_LABELS = Object.fromEntries(
   SPECIALTY_OPTIONS.map((specialty) => [specialty.value, specialty.label]),
 )
 
-export function getSpecialtyLabel(specialty) {
+export function normalizeCustomSpecialtyGroups(customGroups = []) {
+  return (customGroups || [])
+    .map((group) => {
+      const groupLabel = group?.label || group?.groupLabel || 'Кастомные оптики'
+      const options = (group?.options || [])
+        .filter((option) => option?.value && option?.label)
+        .map((option) => ({
+          id: option.id,
+          value: option.value,
+          label: option.label,
+          description: option.description || '',
+          groupLabel,
+        }))
+      return { label: groupLabel, options }
+    })
+    .filter((group) => group.options.length > 0)
+}
+
+export function mergeSpecialtyGroups(customGroups = []) {
+  const seen = new Set(SPECIALTY_OPTIONS.map((specialty) => specialty.value))
+  const normalizedCustomGroups = normalizeCustomSpecialtyGroups(customGroups)
+    .map((group) => ({
+      ...group,
+      options: group.options.filter((option) => {
+        if (seen.has(option.value)) return false
+        seen.add(option.value)
+        return true
+      }),
+    }))
+    .filter((group) => group.options.length > 0)
+  return [...SPECIALTY_GROUPS, ...normalizedCustomGroups]
+}
+
+export function getSpecialtyValues(customGroups = []) {
+  return new Set(mergeSpecialtyGroups(customGroups).flatMap((group) => group.options.map((option) => option.value)))
+}
+
+export function buildSpecialtyLabels(customGroups = []) {
+  const labels = { ...SPECIALTY_LABELS }
+  normalizeCustomSpecialtyGroups(customGroups).forEach((group) => {
+    group.options.forEach((option) => {
+      labels[option.value] = option.label
+    })
+  })
+  return labels
+}
+
+export function getSpecialtyLabel(specialty, customLabelOrLabels) {
+  if (typeof customLabelOrLabels === 'string' && customLabelOrLabels.trim()) {
+    return customLabelOrLabels
+  }
+  if (customLabelOrLabels && typeof customLabelOrLabels === 'object' && customLabelOrLabels[specialty]) {
+    return customLabelOrLabels[specialty]
+  }
   return SPECIALTY_LABELS[specialty] || specialty
 }

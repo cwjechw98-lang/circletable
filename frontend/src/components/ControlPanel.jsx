@@ -1,8 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import CastingAssistantModal from './CastingAssistantModal.jsx'
-import { MASCOT_DEFS, MASCOT_LABELS } from './Mascot.jsx'
-import { ROLE_OPTIONS } from '../constants/roles.js'
-import { SPECIALTY_GROUPS } from '../constants/specialties.js'
+import CustomSpecialtiesPanel from './panel/CustomSpecialtiesPanel.jsx'
+import DocumentsPanel from './panel/DocumentsPanel.jsx'
+import PlannedEventsPanel from './panel/PlannedEventsPanel.jsx'
+import ParticipantBuilderPanel from './panel/ParticipantBuilderPanel.jsx'
+import TeamPresetsPanel from './panel/TeamPresetsPanel.jsx'
+import useBuilderState from '../hooks/useBuilderState.js'
+import useParticipantBuilderState from '../hooks/useParticipantBuilderState.js'
+import { getModelOptions, isEmbeddingModel, pickPreferredModel } from '../constants/models.js'
 
 const OBSERVER_MODE_OPTIONS = [
   { value: 'manual', label: 'Бесконечный режим' },
@@ -16,25 +21,29 @@ const DENSITY_MODE_OPTIONS = [
   { value: 'stage', label: 'Сценический' },
 ]
 
-const PREFERRED_MODELS = {
-  anthropic: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-latest', 'claude-haiku-3-5-20241022'],
-  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1-mini', 'o4-mini'],
-  ollama: [
-    'gemini-3-flash-preview:cloud',
-    'qwen3.5:cloud',
-    'glm-5:cloud',
-    'minimax-m2.5:cloud',
-    'deepseek-r1',
-    'deepseek-r1:8b',
-    'qwen3:4b',
-    'qwen3',
-    'gemma3:4b',
-    'gemma3',
-    'llama3.2',
-  ],
+const INTERNET_MODE_OPTIONS = [
+  { value: 'off', label: 'Off' },
+  { value: 'auto', label: 'Auto' },
+  { value: 'on', label: 'On' },
+]
+
+const DECISION_STAGE_LABELS = {
+  explore: 'Исследование',
+  challenge: 'Проверка гипотез',
+  converge: 'Сведение вариантов',
+  decide: 'Фиксация решения',
+  stalled: 'Потеря фокуса',
 }
 
-const EMBEDDING_MARKERS = ['embed', 'embedding', 'nomic-embed', 'text-embedding', 'bge', 'e5']
+const NEXT_ACTION_LABELS = {
+  continue: 'Продолжить раунд',
+  ask_user: 'Уточнить у пользователя',
+  add_expert: 'Добрать эксперта',
+  bench_participant: 'Разгрузить состав',
+  fact_check: 'Проверить факты',
+  final_round: 'Идти к финалу',
+}
+
 const ASSISTANT_MODEL_KEY = 'circletable-casting-assistant-model'
 
 function readStoredAssistantConfig() {
@@ -66,45 +75,12 @@ function getSessionStateLabel(state) {
   }
 }
 
-function renderSpecialtyOptions() {
-  return SPECIALTY_GROUPS.map((group) => (
-    <optgroup key={group.label} label={group.label}>
-      {group.options.map((specialty) => (
-        <option key={specialty.value} value={specialty.value}>
-          {specialty.label}
-        </option>
-      ))}
-    </optgroup>
-  ))
-}
-
-function pickPreferredModel(providerName, models) {
-  if (!models || models.length === 0) {
-    return ''
+function clampPercent(value, fallback = 0) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    return fallback
   }
-
-  const preferred = PREFERRED_MODELS[providerName] || []
-  const exactMatch = preferred.find((model) => models.includes(model))
-  if (exactMatch) {
-    return exactMatch
-  }
-
-  const fallback = models.find((model) => {
-    const lower = model.toLowerCase()
-    return !EMBEDDING_MARKERS.some((marker) => lower.includes(marker))
-  })
-
-  return fallback || models[0]
-}
-
-function isEmbeddingModel(model) {
-  const lower = (model || '').toLowerCase()
-  return EMBEDDING_MARKERS.some((marker) => lower.includes(marker))
-}
-
-function formatMascotLabel(mascot) {
-  const label = MASCOT_LABELS[mascot] || mascot
-  return label ? `${label.charAt(0).toUpperCase()}${label.slice(1)}` : mascot
+  return Math.max(0, Math.min(100, Math.round(numeric)))
 }
 
 export default function ControlPanel({
@@ -112,7 +88,11 @@ export default function ControlPanel({
   room,
   session,
   sessionState,
-  topic,
+  committedTopic,
+  draftTopic,
+  topicDirty,
+  topicFocusMode,
+  topicFocusActive,
   activeParticipants,
   connected,
   refreshingProviders,
@@ -120,7 +100,13 @@ export default function ControlPanel({
   latestObserverReview,
   observerBusy,
   teamPresets = [],
-  onTopicChange,
+  customSpecialtyGroups = [],
+  plannedEvents = [],
+  currentRoomId,
+  onTopicDraftChange,
+  onBeginTopicEditing,
+  onConfirmTopic,
+  onCancelTopic,
   onStartSession,
   onPauseSession,
   onResumeSession,
@@ -133,24 +119,29 @@ export default function ControlPanel({
   onObserverModeChange,
   onDensityModeChange,
   onCreateParticipant,
+  onBenchParticipant,
   onSubmitQuestion,
   onCreateTeamPreset,
   onApplyTeamPreset,
   onDeleteTeamPreset,
+  onCreateCustomSpecialty,
+  onUpdateCustomSpecialty,
+  onDeleteCustomSpecialty,
+  onInternetModeChange,
+  onRunFactCheck,
+  factCheck,
+  onCreatePlannedEvent,
+  onUpdatePlannedEvent,
+  onDeletePlannedEvent,
 }) {
-  const [newName, setNewName] = useState('')
-  const [newRole, setNewRole] = useState('critic')
-  const [newSpecialty, setNewSpecialty] = useState('digital-generalist')
-  const [newProvider, setNewProvider] = useState('ollama')
-  const [newModel, setNewModel] = useState('')
-  const [newMascot, setNewMascot] = useState('wizard')
-  const [saveToInventory, setSaveToInventory] = useState(true)
   const [question, setQuestion] = useState('')
   const [assistantOpen, setAssistantOpen] = useState(false)
   const [assistantMode, setAssistantMode] = useState('full')
   const [deferredGapFillOpen, setDeferredGapFillOpen] = useState(false)
+  const [deferredBenchParticipantId, setDeferredBenchParticipantId] = useState('')
+  const [dismissedExcessAdviceKey, setDismissedExcessAdviceKey] = useState('')
   const [assistantSettings, setAssistantSettings] = useState(() => readStoredAssistantConfig())
-  const [presetName, setPresetName] = useState('')
+  const [observerOpen, setObserverOpen] = useState(true)
 
   const effectiveSessionState = sessionState === 'running' && session?.status && session.status !== 'running'
     ? session.status
@@ -160,31 +151,51 @@ export default function ControlPanel({
   const pausePending = effectiveSessionState === 'pause_requested'
   const running = activeSession && !paused && !pausePending
   const editable = !activeSession || paused
+  const canChangeRoomSettings = editable
+  const finished = ['completed', 'stopped'].includes(effectiveSessionState)
   const visibleSessionStatus = effectiveSessionState
-  const displayTopic = session?.topic || topic
+  const displayTopic = session?.topic || committedTopic
   const densityMode = room?.densityMode || 'normal'
-
-  const availableProviders = useMemo(
-    () => Object.entries(providers).filter(([, value]) => value.available).map(([key]) => key),
-    [providers],
-  )
-
-  useEffect(() => {
-    if (availableProviders.length > 0 && !availableProviders.includes(newProvider)) {
-      setNewProvider(availableProviders[0])
-    }
-  }, [availableProviders, newProvider])
-
-  useEffect(() => {
-    const models = providers[newProvider]?.models || []
-    if (models.length === 0) {
-      return
-    }
-
-    if (!newModel || !models.includes(newModel) || isEmbeddingModel(newModel)) {
-      setNewModel(pickPreferredModel(newProvider, models))
-    }
-  }, [newProvider, newModel, providers])
+  const internetMode = room?.internetMode || room?.settings?.internet_mode || 'auto'
+  const factCheckStatus = factCheck?.status || ''
+  const factCheckBusy = ['queued', 'running'].includes(factCheckStatus)
+  const canRunFactCheck = (paused || finished) && Boolean(session?.id)
+  const hasCommittedTopic = Boolean((committedTopic || '').trim())
+  const topicNeedsConfirmation = Boolean(topicDirty)
+  const topicInputHint = topicFocusMode === 'off'
+    ? 'Введите тему и подтвердите её галочкой, чтобы кастинг и старт работали именно с этим вопросом.'
+    : 'Нажмите, чтобы открыть режим фокуса и сформулировать тему без отвлекающих панелей.'
+  const topicDependentHint = topicNeedsConfirmation
+    ? 'Сначала подтвердите новую тему: сейчас это ещё черновик.'
+    : 'Работает с подтверждённой темой комнаты.'
+  const {
+    participantBuilderProps,
+    selectedProvider,
+    selectedModel,
+    availableProviders,
+    setSelectedSpecialty,
+    createAssistantParticipants,
+  } = useParticipantBuilderState({
+    providers,
+    customSpecialtyGroups,
+    onCreateParticipant,
+  })
+  const { presetsProps, eventsProps, customSpecialtiesProps } = useBuilderState({
+    teamPresets,
+    activeParticipantsCount: activeParticipants.length,
+    editable,
+    plannedEvents,
+    sessionLastRoundNumber: session?.lastRoundNumber,
+    customSpecialtyGroups,
+    onCreateTeamPreset,
+    onApplyTeamPreset,
+    onDeleteTeamPreset,
+    onCreateCustomSpecialty,
+    onUpdateCustomSpecialty,
+    onDeleteCustomSpecialty,
+    onCreatePlannedEvent,
+    onDeletePlannedEvent,
+  })
 
   useEffect(() => {
     if (availableProviders.length === 0) {
@@ -192,11 +203,11 @@ export default function ControlPanel({
     }
 
     setAssistantSettings((current) => {
-      const fallbackProvider = availableProviders.includes(newProvider) ? newProvider : availableProviders[0]
+      const fallbackProvider = availableProviders.includes(selectedProvider) ? selectedProvider : availableProviders[0]
       const providerName = current.provider && availableProviders.includes(current.provider)
         ? current.provider
         : fallbackProvider
-      const models = providers[providerName]?.models || []
+      const models = getModelOptions(providerName, providers)
       const preferredModel = pickPreferredModel(providerName, models)
       const modelName = current.model && models.includes(current.model) && !isEmbeddingModel(current.model)
         ? current.model
@@ -211,7 +222,7 @@ export default function ControlPanel({
         model: modelName,
       }
     })
-  }, [availableProviders, newProvider, providers])
+  }, [availableProviders, selectedProvider, providers])
 
   useEffect(() => {
     if (!assistantSettings.provider) {
@@ -225,11 +236,43 @@ export default function ControlPanel({
     || latestObserverReview?.roundSummary
     || latestObserverReview?.chronicleAfter
     || ''
-  const observerProgress = latestObserverSuggestion?.progress || latestObserverReview?.progress || {}
-  const finalReason = latestObserverReview?.finalReason || ''
-  const missingExpertHint = latestObserverSuggestion?.missingExpertHint || latestObserverReview?.missingExpertHint || ''
+  const observerSource = latestObserverSuggestion || latestObserverReview || {}
+  const observerProgress = observerSource.progress || {}
+  const decisionProgress = observerProgress.decisionProgress || observerSource.decisionProgress || {}
+  const decisionReadiness = clampPercent(decisionProgress.readiness, 0)
+  const decisionStageLabel = DECISION_STAGE_LABELS[decisionProgress.stage] || 'Стадия не ясна'
+  const nextActionLabel = NEXT_ACTION_LABELS[decisionProgress.nextAction] || 'Продолжить наблюдение'
+  const rosterAdvice = observerSource.rosterAdvice || {}
+  const excessParticipant = rosterAdvice.excessParticipant && typeof rosterAdvice.excessParticipant === 'object'
+    ? rosterAdvice.excessParticipant
+    : null
+  const finalReason = observerSource.finalReason || latestObserverReview?.finalReason || ''
+  const missingExpertHint = latestObserverSuggestion?.missingExpertHint || rosterAdvice.missingExpertHint || ''
   const suggestionRound = latestObserverReview?.roundNumber || 0
   const recruitAdviceVisible = Boolean(missingExpertHint) && suggestionRound >= 1 && room?.observerMode !== 'manual'
+  const excessAdviceKey = excessParticipant
+    ? `${suggestionRound}:${excessParticipant.participantId || excessParticipant.profileId || excessParticipant.name || 'unknown'}:${excessParticipant.confidence || 0}`
+    : ''
+
+  function resolveExcessParticipantId() {
+    if (!excessParticipant) {
+      return ''
+    }
+    if (excessParticipant.participantId && activeParticipants.some((item) => item.id === excessParticipant.participantId)) {
+      return excessParticipant.participantId
+    }
+    const byProfile = activeParticipants.find((item) => item.profileId === excessParticipant.profileId)
+    if (byProfile) {
+      return byProfile.id
+    }
+    const byName = activeParticipants.find((item) => item.name === excessParticipant.name)
+    return byName?.id || ''
+  }
+
+  const excessParticipantId = resolveExcessParticipantId()
+  const excessAdviceVisible = Boolean(excessParticipant && excessParticipantId)
+    && excessAdviceKey !== dismissedExcessAdviceKey
+    && room?.observerMode !== 'manual'
 
   useEffect(() => {
     if (deferredGapFillOpen && paused) {
@@ -239,71 +282,26 @@ export default function ControlPanel({
     }
   }, [deferredGapFillOpen, paused])
 
-  function createParticipant() {
-    const trimmed = newName.trim()
-    if (!trimmed) return
-    const chosenModel = newModel || pickPreferredModel(newProvider, providers[newProvider]?.models || [])
-    onCreateParticipant({
-      name: trimmed,
-      role: newRole,
-      specialty: newSpecialty,
-      provider: newProvider,
-      model: chosenModel,
-      mascot: newMascot,
-      emoji: MASCOT_DEFS[newMascot]?.emoji || '🧙',
-      stats: {
-        insight: 50,
-        focus: 50,
-        depth: 50,
-        cooperation: 50,
-        showmanship: 50,
-      },
-      strengths: [],
-      weaknesses: [],
-      summary: '',
-      lastNote: 'Новый герой ещё не прошёл ни одной полной сессии.',
-    }, saveToInventory)
-    setNewName('')
-  }
+  useEffect(() => {
+    if (!deferredBenchParticipantId || !paused) {
+      return
+    }
+    onBenchParticipant?.(deferredBenchParticipantId)
+    setDismissedExcessAdviceKey(excessAdviceKey)
+    setDeferredBenchParticipantId('')
+  }, [deferredBenchParticipantId, paused, onBenchParticipant, excessAdviceKey])
 
-  function createAssistantParticipants(drafts) {
-    drafts.forEach((draft) => {
-      const draftProvider = draft.provider || newProvider
-      const chosenModel = draft.model || newModel || pickPreferredModel(draftProvider, providers[draftProvider]?.models || [])
-      onCreateParticipant({
-        name: draft.name,
-        role: draft.role,
-        specialty: draft.specialty,
-        provider: draftProvider,
-        model: chosenModel,
-        mascot: draft.mascot,
-        emoji: MASCOT_DEFS[draft.mascot]?.emoji || draft.emoji || '🧙',
-        stats: draft.stats || {
-          insight: 50,
-          focus: 50,
-          depth: 50,
-          cooperation: 50,
-          showmanship: 50,
-        },
-        strengths: draft.strengths || [],
-        weaknesses: draft.weaknesses || [],
-        summary: draft.summary || '',
-        lastNote: draft.lastNote || 'Предложен кастинг-помощником под текущую задачу.',
-      }, saveToInventory)
-    })
-  }
+  useEffect(() => {
+    if (latestObserverSuggestion || latestObserverReview) {
+      setObserverOpen(true)
+    }
+  }, [latestObserverSuggestion, latestObserverReview])
 
   function submitQuestion() {
     const trimmed = question.trim()
     if (!trimmed) return
     onSubmitQuestion(trimmed)
     setQuestion('')
-  }
-
-  function createTeamPreset() {
-    const fallbackName = `Состав ${teamPresets.length + 1}`
-    onCreateTeamPreset(presetName.trim() || fallbackName)
-    setPresetName('')
   }
 
   function openGapFillAssistant() {
@@ -318,6 +316,39 @@ export default function ControlPanel({
     }
     setDeferredGapFillOpen(true)
     onPauseSession?.()
+  }
+
+  function handleExcessAdviceAction() {
+    if (!excessParticipantId) {
+      return
+    }
+    if (running) {
+      setDeferredBenchParticipantId(excessParticipantId)
+      onPauseSession?.()
+      return
+    }
+    onBenchParticipant?.(excessParticipantId)
+    setDismissedExcessAdviceKey(excessAdviceKey)
+  }
+
+  function dismissExcessAdvice() {
+    setDismissedExcessAdviceKey(excessAdviceKey)
+  }
+
+  async function createSpecialtyFromObserverHint() {
+    if (!missingExpertHint) return
+    try {
+      const specialty = await onCreateCustomSpecialty?.({
+        sourceHint: missingExpertHint,
+        groupLabel: 'Кастомные оптики',
+        description: missingExpertHint,
+      })
+      if (specialty?.value) {
+        setSelectedSpecialty(specialty.value)
+      }
+    } catch {
+      // Ошибка будет видна в сетевом слое; основной сценарий подбора не блокируем.
+    }
   }
 
   return (
@@ -373,15 +404,76 @@ export default function ControlPanel({
         </div>
       </div>
 
+      <div className="internet-settings-row">
+          <div className="internet-settings-copy">
+            <div className="internet-settings-title">Интернет</div>
+            <div className="internet-settings-help">
+              Off — память комнаты. Auto — по необходимости. On — внешний поиск разрешён.
+            </div>
+          </div>
+        <label className="internet-settings-select" data-hint="Режим внешнего поиска для этой комнаты. Документы комнаты доступны автоматически и не зависят от этого переключателя.">
+          <span>Режим</span>
+          <select
+            value={internetMode}
+            disabled={!canChangeRoomSettings}
+            onChange={(event) => onInternetModeChange?.(event.target.value)}
+          >
+            {INTERNET_MODE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {editable && <DocumentsPanel roomId={currentRoomId} />}
+
+      {editable && (
+        <CustomSpecialtiesPanel
+          {...customSpecialtiesProps}
+        />
+      )}
+
       <div className="topic-row">
         {editable ? (
-          <input
-            className="pixel-input"
-            value={topic}
-            onChange={(event) => onTopicChange(event.target.value)}
-            placeholder="Введите тему или новый вопрос для комнаты"
-            disabled={!editable}
-          />
+          <div className={`topic-input-shell${topicNeedsConfirmation ? ' is-dirty' : ''}${topicFocusActive ? ' is-focus-active' : ''}`}>
+            <input
+              className={`pixel-input${topicFocusMode !== 'off' ? ' is-launcher' : ''}`}
+              value={draftTopic}
+              onChange={(event) => onTopicDraftChange?.(event.target.value)}
+              onFocus={() => onBeginTopicEditing?.()}
+              onClick={() => onBeginTopicEditing?.()}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && topicFocusMode === 'off') {
+                  onConfirmTopic?.()
+                }
+                if (event.key === 'Escape' && topicFocusMode === 'off') {
+                  onCancelTopic?.()
+                }
+              }}
+              placeholder="Введите тему или новый вопрос для комнаты"
+              disabled={!editable}
+              readOnly={topicFocusMode !== 'off'}
+              data-hint={topicInputHint}
+            />
+            {topicNeedsConfirmation && topicFocusMode === 'off' && (
+              <div className="topic-confirm-actions">
+                <button
+                  className="pixel-btn add topic-confirm-btn"
+                  onClick={onConfirmTopic}
+                  data-hint="Подтвердить тему и сделать её активной для старта и кастинга."
+                >
+                  ✓
+                </button>
+                <button
+                  className="pixel-btn ghost topic-confirm-btn"
+                  onClick={onCancelTopic}
+                  data-hint="Отменить черновик и вернуть последнюю подтверждённую тему."
+                >
+                  ×
+                </button>
+              </div>
+            )}
+          </div>
         ) : (
           <div className="topic-marquee-shell" data-hint="Текущая тема этой сессии. Во время активного раунда строка прокручивается автоматически.">
             <div className="topic-marquee-track">
@@ -392,25 +484,13 @@ export default function ControlPanel({
         )}
 
         <button
-          className="pixel-btn helper"
-          onClick={() => {
-            setAssistantMode('full')
-            setAssistantOpen(true)
-          }}
-          disabled={!editable || !topic.trim()}
-          data-hint="Помощник предложит состав персонажей под тему и контекст беседы. Его модель меняется внутри этого окна."
-        >
-          Помощь
-        </button>
-
-        <button
           className="pixel-btn ghost"
           onClick={() => {
             setAssistantMode('gap_fill')
             setAssistantOpen(true)
           }}
-          disabled={!editable || !topic.trim()}
-          data-hint="Помощник посмотрит на тему, хронику и состав стола и предложит именно недостающего эксперта."
+          disabled={!editable || !hasCommittedTopic || topicNeedsConfirmation}
+          data-hint={`Помощник посмотрит на тему, хронику и состав стола и предложит именно недостающего эксперта. ${topicDependentHint}`}
         >
           Кого не хватает?
         </button>
@@ -419,8 +499,8 @@ export default function ControlPanel({
           <button
             className="pixel-btn start"
             onClick={onStartSession}
-            disabled={!connected || activeParticipants.length < 2 || !topic.trim()}
-            data-hint="Начать новую сессию обсуждения с текущей темой и составом."
+            disabled={!connected || activeParticipants.length < 2 || !hasCommittedTopic || topicNeedsConfirmation}
+            data-hint={`Начать новую сессию обсуждения с текущей темой и составом. ${topicDependentHint}`}
           >
             ▶ Запустить сессию
           </button>
@@ -447,58 +527,148 @@ export default function ControlPanel({
             <button className="pixel-btn start" onClick={onResumeSession} data-hint="Продолжить эту же сессию с текущим составом.">▶ Продолжить</button>
             <button className="pixel-btn ghost" onClick={onRequestWrap} data-hint="Мягко попросить участников двигаться к выводу в ближайшие раунды.">Закругляться</button>
             <button className="pixel-btn stop" onClick={onRequestFinal} data-hint="Объявить следующий раунд финальным: участники подведут итог вместо новых веток.">Финальный раунд</button>
+            <button
+              className="pixel-btn ghost"
+              onClick={() => onRunFactCheck?.('round')}
+              disabled={!canRunFactCheck || factCheckBusy}
+              data-hint="Ручной фактчекинг текущего раунда. Проверяются только верифицируемые тезисы, а спорные интерпретации не штрафуются."
+            >
+              {factCheckBusy ? 'Проверяем...' : 'Проверить факты'}
+            </button>
             <button className="pixel-btn danger" onClick={onStopSession} data-hint="Остановить сессию на ближайшей безопасной точке.">■ Остановить</button>
           </>
+        )}
+
+        {finished && (
+          <button
+            className="pixel-btn ghost"
+            onClick={() => onRunFactCheck?.('session')}
+            disabled={!canRunFactCheck || factCheckBusy}
+            data-hint="Ручной фактчекинг всей завершённой сессии с накоплением надёжности задействованных моделей."
+          >
+            {factCheckBusy ? 'Проверяем...' : 'Проверить факты'}
+          </button>
         )}
       </div>
 
       {(latestObserverSuggestion || latestObserverReview) && (
         <div className="observer-banner">
-          <div className="observer-banner-title">Хрономант</div>
-          <div className="observer-banner-body">
-            {latestObserverSuggestion?.summary || latestObserverReview?.tableComment || latestObserverReview?.roundSummary}
+          <div className="observer-banner-head">
+            <div>
+              <div className="observer-banner-title">Хрономант</div>
+              {!observerOpen && (
+                <div className="observer-banner-compact">
+                  {missingExpertHint ? `Кого не хватает: ${missingExpertHint}` : latestObserverSuggestion?.summary || latestObserverReview?.tableComment || latestObserverReview?.roundSummary}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              className="observer-collapse-btn"
+              onClick={() => setObserverOpen((value) => !value)}
+              data-hint={observerOpen ? 'Свернуть блок Хрономанта и освободить место для управления комнатой.' : 'Развернуть последнюю оценку Хрономанта.'}
+            >
+              {observerOpen ? 'Свернуть' : 'Развернуть'}
+            </button>
           </div>
-          <div className="observer-progress-grid">
-            {[
-              ['Новизна', observerProgress.novelty ?? 50],
-              ['Фокус', observerProgress.focus ?? 50],
-              ['Сходимость', observerProgress.convergence ?? 50],
-            ].map(([label, value]) => (
-              <div key={label} className="observer-progress-card">
-                <div className="observer-progress-head">
-                  <span>{label}</span>
-                  <b>{value}%</b>
+          {observerOpen && (
+            <>
+              <div className="observer-banner-body">
+                {latestObserverSuggestion?.summary || latestObserverReview?.tableComment || latestObserverReview?.roundSummary}
+              </div>
+              <div className="observer-decision-card">
+                <div className="observer-decision-head">
+                  <span>Прогресс решения</span>
+                  <b>{decisionReadiness}%</b>
                 </div>
                 <div className="observer-progress-track">
-                  <div className="observer-progress-fill" style={{ width: `${value}%` }} />
+                  <div className="observer-progress-fill" style={{ width: `${decisionReadiness}%` }} />
+                </div>
+                <div className="observer-decision-meta">
+                  <span>Стадия: {decisionStageLabel}</span>
+                  <span>Следующий ход: {nextActionLabel}</span>
+                </div>
+                <div className="observer-decision-blocker">
+                  Блокер: {decisionProgress.blocker || 'явного блокера нет'}
                 </div>
               </div>
-            ))}
-          </div>
-          {finalReason && (
-            <div className="observer-banner-note">
-              Причина финала: {finalReason}
-            </div>
-          )}
-          {missingExpertHint && (
-            <div className="observer-banner-note is-accent">
-              Кого не хватает: {missingExpertHint}
-            </div>
-          )}
-          {recruitAdviceVisible && (
-            <div className="observer-recruit-card">
-              <div className="observer-recruit-text">
-                Хрономант советует добрать эксперта, но решение остаётся за тобой.
+              <div className="observer-progress-grid">
+                {[
+                  ['Новизна', observerProgress.novelty ?? 50],
+                  ['Фокус', observerProgress.focus ?? 50],
+                  ['Сходимость', observerProgress.convergence ?? 50],
+                ].map(([label, value]) => (
+                  <div key={label} className="observer-progress-card">
+                    <div className="observer-progress-head">
+                      <span>{label}</span>
+                      <b>{value}%</b>
+                    </div>
+                    <div className="observer-progress-track">
+                      <div className="observer-progress-fill" style={{ width: `${value}%` }} />
+                    </div>
+                  </div>
+                ))}
               </div>
-              <button
-                className="pixel-btn ghost"
-                onClick={handleRecruitAdviceAction}
-                disabled={pausePending}
-                data-hint="Открыть точечный добор недостающего героя. Во время живого раунда сначала поставим стол на паузу."
-              >
-                {paused || !activeSession ? 'Подобрать героя' : pausePending ? 'Ждём паузу...' : 'Пауза и добор'}
-              </button>
-            </div>
+              {finalReason && (
+                <div className="observer-banner-note">
+                  Причина финала: {finalReason}
+                </div>
+              )}
+              <div className="observer-roster-grid">
+                {missingExpertHint && (
+                  <div className="observer-roster-card is-accent">
+                    <div className="observer-roster-title">Кого не хватает</div>
+                    <div className="observer-roster-text">{missingExpertHint}</div>
+                    {recruitAdviceVisible && (
+                      <div className="observer-roster-actions">
+                        <button
+                          className="pixel-btn ghost"
+                          onClick={handleRecruitAdviceAction}
+                          disabled={pausePending}
+                          data-hint="Открыть точечный добор недостающего героя. Во время живого раунда сначала поставим стол на паузу."
+                        >
+                          {paused || !activeSession ? 'Подобрать героя' : pausePending ? 'Ждём паузу...' : 'Пауза и добор'}
+                        </button>
+                        <button
+                          className="pixel-btn add"
+                          onClick={createSpecialtyFromObserverHint}
+                          disabled={!editable || !missingExpertHint}
+                          data-hint="Добавить подсказку Хрономанта как новую экспертизу, чтобы дальше выбирать её в профиле персонажа."
+                        >
+                          Сохранить как экспертизу
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {excessAdviceVisible && (
+                  <div className="observer-roster-card is-warning">
+                    <div className="observer-roster-title">Кто мешает фокусу сейчас</div>
+                    <div className="observer-roster-text">
+                      <b>{excessParticipant.name}</b>: {excessParticipant.reason}
+                      {excessParticipant.confidence ? ` · уверенность ${excessParticipant.confidence}%` : ''}
+                    </div>
+                    <div className="observer-roster-actions">
+                      <button
+                        className="pixel-btn ghost"
+                        onClick={handleExcessAdviceAction}
+                        disabled={pausePending || !excessParticipantId}
+                        data-hint="Ручное решение: во время живого раунда сначала ставим паузу, затем отправляем участника на скамейку."
+                      >
+                        {running ? 'Пауза и скамейка' : pausePending ? 'Ждём паузу...' : 'На скамейку'}
+                      </button>
+                      <button
+                        className="pixel-btn ghost"
+                        onClick={dismissExcessAdvice}
+                        data-hint="Скрыть эту подсказку только в интерфейсе. Состав не меняется."
+                      >
+                        Оставить
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -518,137 +688,30 @@ export default function ControlPanel({
 
       {editable && (
         <div className="builder-panel">
-          <div className="builder-title">Создать персонажа</div>
+          <ParticipantBuilderPanel {...participantBuilderProps} />
 
-          <div className="builder-grid">
-            <input
-              className="mini-input"
-              placeholder="Имя героя"
-              value={newName}
-              onChange={(event) => setNewName(event.target.value)}
-              onKeyDown={(event) => event.key === 'Enter' && createParticipant()}
-            />
+          <TeamPresetsPanel {...presetsProps} />
 
-            <select className="mini-select" value={newRole} onChange={(event) => setNewRole(event.target.value)}>
-              {ROLE_OPTIONS.map((role) => (
-                <option key={role.value} value={role.value}>{role.label}</option>
-              ))}
-            </select>
-
-            <select className="mini-select specialty-select" value={newSpecialty} onChange={(event) => setNewSpecialty(event.target.value)}>
-              {renderSpecialtyOptions()}
-            </select>
-
-            <select className="mini-select" value={newProvider} onChange={(event) => setNewProvider(event.target.value)}>
-              {availableProviders.map((provider) => (
-                <option key={provider} value={provider}>{provider}</option>
-              ))}
-            </select>
-
-            <select className="mini-select" value={newModel} onChange={(event) => setNewModel(event.target.value)}>
-              {(providers[newProvider]?.models || []).map((model) => (
-                <option key={model} value={model}>{model}</option>
-              ))}
-            </select>
-
-            <select className="mini-select" value={newMascot} onChange={(event) => setNewMascot(event.target.value)}>
-              {Object.keys(MASCOT_DEFS).map((mascot) => (
-                <option key={mascot} value={mascot}>
-                  {MASCOT_DEFS[mascot].emoji} {formatMascotLabel(mascot)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <label className="builder-check">
-            <input
-              type="checkbox"
-              checked={saveToInventory}
-              onChange={(event) => setSaveToInventory(event.target.checked)}
-            />
-            Сразу сохранить в инвентарь
-          </label>
-
-          <button className="pixel-btn add" onClick={createParticipant} data-hint="Создать персонажа с выбранными ролью, профилем и моделью.">+ Посадить за стол</button>
-
-          <div className="preset-panel">
-            <div className="preset-panel-head">
-              <div className="preset-panel-title">Сохранённые составы</div>
-              <div className="preset-panel-sub">Сохраняют текущих участников за столом как готовую команду.</div>
-            </div>
-
-            <div className="preset-create-row">
-              <input
-                className="mini-input"
-                value={presetName}
-                onChange={(event) => setPresetName(event.target.value)}
-                onKeyDown={(event) => event.key === 'Enter' && activeParticipants.length > 0 && createTeamPreset()}
-                placeholder="Имя состава"
-              />
-              <button
-                className="pixel-btn ghost"
-                onClick={createTeamPreset}
-                disabled={activeParticipants.length === 0}
-                data-hint="Сохранить текущий состав стола как готовую команду."
-              >
-                Сохранить состав
-              </button>
-            </div>
-
-            <div className="preset-list">
-              {teamPresets.length === 0 && (
-                <div className="preset-empty">Пока нет сохранённых составов. Соберите команду и сохраните её здесь.</div>
-              )}
-
-              {teamPresets.map((preset) => (
-                <div key={preset.id} className="preset-card">
-                  <div className="preset-card-main">
-                    <div className="preset-card-name">{preset.name}</div>
-                    <div className="preset-card-meta">
-                      {preset.participants?.map((participant) => participant.name).filter(Boolean).slice(0, 4).join(' • ')
-                        || 'Состав без имён'}
-                      {(preset.participants?.length || 0) > 4 ? ` • ещё ${(preset.participants?.length || 0) - 4}` : ''}
-                    </div>
-                  </div>
-                  <div className="preset-card-actions">
-                    <button
-                      className="pixel-btn ghost"
-                      onClick={() => onApplyTeamPreset?.(preset.id)}
-                      disabled={!editable}
-                      data-hint="Применить этот состав к текущей комнате."
-                    >
-                      Применить
-                    </button>
-                    <button
-                      className="pixel-btn danger"
-                      onClick={() => onDeleteTeamPreset?.(preset.id)}
-                      data-hint="Удалить сохранённый состав."
-                    >
-                      Удалить
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <PlannedEventsPanel {...eventsProps} />
         </div>
       )}
 
       <CastingAssistantModal
         open={assistantOpen}
         mode={assistantMode}
-        topic={topic}
-        provider={newProvider}
-        model={newModel || pickPreferredModel(newProvider, providers[newProvider]?.models || [])}
+        topic={committedTopic}
+        provider={selectedProvider}
+        model={selectedModel || pickPreferredModel(selectedProvider, providers)}
         providers={providers}
         disabled={!editable}
         roomSummary={room?.summary || ''}
         sessionChronicle={session?.chronicle || ''}
         latestRoundSummary={latestRoundSummary}
         activeParticipants={activeParticipants}
-        assistantProvider={assistantSettings.provider || newProvider}
-        assistantModel={assistantSettings.model || newModel || pickPreferredModel(newProvider, providers[newProvider]?.models || [])}
+        assistantProvider={assistantSettings.provider || selectedProvider}
+        assistantModel={assistantSettings.model || selectedModel || pickPreferredModel(selectedProvider, providers)}
         missingExpertHint={missingExpertHint}
+        customSpecialtyGroups={customSpecialtyGroups}
         onAssistantChange={setAssistantSettings}
         onClose={() => setAssistantOpen(false)}
         onAccept={createAssistantParticipants}

@@ -1,4 +1,10 @@
 import React from 'react'
+import PixelSprite from './PixelSprite.jsx'
+import {
+  MASCOT_DEFS,
+  MASCOT_LABELS,
+  resolveMascot,
+} from './mascotData.js'
 import { getRoleLabel } from '../constants/roles.js'
 import { getSpecialtyLabel } from '../constants/specialties.js'
 
@@ -7,52 +13,6 @@ import { getSpecialtyLabel } from '../constants/specialties.js'
  * Each mascot type has a distinct emoji + color theme.
  * Emotions add CSS animations + particle effects.
  */
-
-const MASCOT_DEFS = {
-  owl:     { emoji: '🦉', color: '#aa44ff' },
-  robot:   { emoji: '🤖', color: '#00ff66' },
-  cat:     { emoji: '🐱', color: '#4488ff' },
-  llama:   { emoji: '🦙', color: '#ff8833' },
-  dragon:  { emoji: '🐲', color: '#ff3355' },
-  wizard:  { emoji: '🧙', color: '#00f0f0' },
-  ghost:   { emoji: '👻', color: '#e0e0e8' },
-  crystal: { emoji: '💎', color: '#1abc9c' },
-  fox:     { emoji: '🦊', color: '#e67e22' },
-  panda:   { emoji: '🐼', color: '#95a5a6' },
-  wolf:    { emoji: '🐺', color: '#7f8c8d' },
-  tiger:   { emoji: '🐯', color: '#f39c12' },
-  frog:    { emoji: '🐸', color: '#2ecc71' },
-  octopus: { emoji: '🐙', color: '#9b59b6' },
-  alien:   { emoji: '👽', color: '#7bed9f' },
-  bat:     { emoji: '🦇', color: '#6c5ce7' },
-  bee:     { emoji: '🐝', color: '#f1c40f' },
-  eagle:   { emoji: '🦅', color: '#c6a56b' },
-  unicorn: { emoji: '🦄', color: '#ff66cc' },
-  raccoon: { emoji: '🦝', color: '#a1887f' },
-}
-
-const MASCOT_LABELS = {
-  owl: 'сова',
-  robot: 'робот',
-  cat: 'кот',
-  llama: 'лама',
-  dragon: 'дракон',
-  wizard: 'маг',
-  ghost: 'призрак',
-  crystal: 'кристалл',
-  fox: 'лис',
-  panda: 'панда',
-  wolf: 'волк',
-  tiger: 'тигр',
-  frog: 'лягушка',
-  octopus: 'осьминог',
-  alien: 'пришелец',
-  bat: 'летучая мышь',
-  bee: 'пчела',
-  eagle: 'орёл',
-  unicorn: 'единорог',
-  raccoon: 'енот',
-}
 
 const EMOTION_PARTICLES = {
   happy:    ['✨', '⭐'],
@@ -65,8 +25,13 @@ const EMOTION_PARTICLES = {
 }
 
 export default function Mascot({ agent, emotion = 'neutral', isThinking, isSpeaking, responseMetric, isSlowThinking }) {
-  const def = MASCOT_DEFS[agent.mascot] || MASCOT_DEFS.wizard
-  const displayEmoji = agent.emoji || def.emoji
+  const mascot = resolveMascot(agent)
+  const def = MASCOT_DEFS[mascot] || MASCOT_DEFS.wizard
+  const spriteEmotion = isThinking && !isSpeaking
+    ? 'thinking'
+    : isSpeaking
+      ? 'speaking'
+      : emotion
 
   // Determine CSS class for animation
   let animClass = ''
@@ -75,7 +40,7 @@ export default function Mascot({ agent, emotion = 'neutral', isThinking, isSpeak
   else if (emotion && emotion !== 'neutral') animClass = emotion
 
   const particles = EMOTION_PARTICLES[emotion] || []
-  const specialtyLabel = getSpecialtyLabel(agent.specialty)
+  const specialtyLabel = getSpecialtyLabel(agent.specialty, agent.specialtyLabel)
   const roleLabel = getRoleLabel(agent.role)
   const modelLabel = `${agent.provider}/${agent.model.length > 24 ? `${agent.model.slice(0, 24)}…` : agent.model}`
   const hoverLine = `${roleLabel} · ${specialtyLabel} · ${modelLabel}`
@@ -86,10 +51,17 @@ export default function Mascot({ agent, emotion = 'neutral', isThinking, isSpeak
 
   return (
     <div className="mascot-wrapper">
-      <div className={`mascot ${animClass}`} style={borderStyle}>
-        <span role="img" aria-label={MASCOT_LABELS[agent.mascot] || agent.mascot}>
-          {displayEmoji}
-        </span>
+      <div
+        className={`mascot ${animClass}`}
+        style={borderStyle}
+        role="img"
+        aria-label={`${MASCOT_LABELS[mascot] || mascot} — ${agent.name}`}
+      >
+        <PixelSprite
+          mascot={mascot}
+          emotion={spriteEmotion}
+          size={64}
+        />
 
         {isSlowThinking && (
           <div className="mascot-snooze" aria-hidden="true">
@@ -138,4 +110,4 @@ export default function Mascot({ agent, emotion = 'neutral', isThinking, isSpeak
   )
 }
 
-export { MASCOT_DEFS, MASCOT_LABELS }
+export { MASCOT_DEFS, MASCOT_LABELS, resolveMascot } from './mascotData.js'

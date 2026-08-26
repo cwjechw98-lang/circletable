@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import Mascot from './Mascot.jsx'
+import Mascot, { resolveMascot } from './Mascot.jsx'
+import { MiniSprite } from './PixelSprite.jsx'
 import SpeechBubble from './SpeechBubble.jsx'
 import { getRoleLabel } from '../constants/roles.js'
 import { getSpecialtyLabel } from '../constants/specialties.js'
 
 function agentPosition(index, total) {
   const angle = (index * 2 * Math.PI) / Math.max(total, 1) - Math.PI / 2
-  const radiusX = 31
-  const radiusY = 28
+  const radiusX = total >= 7 ? 35 : total >= 5 ? 37 : 40
+  const radiusY = total >= 7 ? 30 : total >= 5 ? 33 : 36
   return {
     x: 50 + radiusX * Math.cos(angle),
     y: 50 + radiusY * Math.sin(angle),
@@ -102,6 +103,9 @@ export default function RoundTable({
   ] : []
   const infoAgentMetricState = infoAgent ? responseMetrics?.[infoAgent.id] : null
   const infoAgentMetric = infoAgentMetricState?.currentModelMetric || null
+  const infoAgentMascot = infoAgent ? resolveMascot(infoAgent) : null
+  const infoAgentEmotion = infoAgent ? emotions[infoAgent.id] || 'neutral' : 'neutral'
+  const infoAgentStrengths = Array.isArray(infoAgent?.strengths) ? infoAgent.strengths.slice(0, 3) : []
 
   useEffect(() => {
     localStorage.setItem(SEAT_OFFSETS_KEY, JSON.stringify(seatOffsets))
@@ -255,11 +259,15 @@ export default function RoundTable({
         {infoAgent && (
           <div className="table-agent-card">
             <div className="table-agent-card-head">
-              <span>{infoAgent.emoji}</span>
+              <span className="table-agent-card-avatar">
+                {infoAgentMascot
+                  ? <MiniSprite mascot={infoAgentMascot} emotion={infoAgentEmotion} />
+                  : infoAgent.emoji}
+              </span>
               <strong>{infoAgent.name}</strong>
             </div>
             <div className="table-agent-card-line">
-              {getRoleLabel(infoAgent.role)} · {getSpecialtyLabel(infoAgent.specialty)}
+              {getRoleLabel(infoAgent.role)} · {getSpecialtyLabel(infoAgent.specialty, infoAgent.specialtyLabel)}
             </div>
             <div className="table-agent-card-line">
               {infoAgent.provider}/{infoAgent.model}
@@ -286,6 +294,20 @@ export default function RoundTable({
             <div className="table-agent-card-note">
               {infoAgent.lastNote || infoAgent.summary || 'Хрономант ещё не оставил заметку по этому герою.'}
             </div>
+            {(infoAgent.summary || infoAgent.lastNote || infoAgentStrengths.length > 0) && (
+              <div className="table-agent-memory">
+                {infoAgentStrengths.length > 0 && (
+                  <div className="table-agent-memory-line">
+                    <strong>Сильные темы:</strong> {infoAgentStrengths.join(' · ')}
+                  </div>
+                )}
+                {infoAgent.summary && (
+                  <div className="table-agent-memory-line">
+                    <strong>Обычно привносит:</strong> {infoAgent.summary}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

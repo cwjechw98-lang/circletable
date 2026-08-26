@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { getRoleLabel } from '../constants/roles.js'
 import { getSpecialtyLabel } from '../constants/specialties.js'
+import PixelSprite from './PixelSprite.jsx'
+import { resolveMascot } from './Mascot.jsx'
 
 const TABS = [
   { value: 'active', label: 'За столом' },
@@ -30,14 +32,31 @@ function StatBar({ label, value = 0 }) {
 
 function CharacterCard({ entity, actions = [], selectable, selected, onToggleSelect }) {
   const stats = entity.stats || {}
+  const hasMemory = Boolean(entity.hasMemory || entity.memoryGraphId)
+  const mascot = resolveMascot(entity)
+  const strongTopics = Array.isArray(entity.strengths) ? entity.strengths.slice(0, 3) : []
   return (
     <div className="character-card">
       <div className="character-card-top">
-        <div className="character-avatar">{entity.emoji || '🧙'}</div>
+        <div className="character-avatar">
+          <PixelSprite mascot={mascot} emotion="neutral" size={36} />
+        </div>
         <div className="character-meta">
-          <div className="character-name">{entity.name}</div>
+          <div className="character-name-row">
+            <div className="character-name">{entity.name}</div>
+            {hasMemory && (
+              <span
+                className="character-memory-badge"
+                title="У профиля есть содержательная память между сессиями."
+                data-hint="Память профиля: этот персонаж сохранял прошлые ответы в личный граф и может использовать их в следующих обсуждениях."
+                aria-label="У профиля есть память между сессиями"
+              >
+                🧠
+              </span>
+            )}
+          </div>
           <div className="character-role">
-            {getRoleLabel(entity.role)} · {getSpecialtyLabel(entity.specialty)}
+            {getRoleLabel(entity.role)} · {getSpecialtyLabel(entity.specialty, entity.specialtyLabel)}
           </div>
         </div>
         {selectable && (
@@ -48,6 +67,24 @@ function CharacterCard({ entity, actions = [], selectable, selected, onToggleSel
       </div>
 
       <div className="character-summary">{entity.summary || entity.lastNote || 'Характеристики появятся после первой полной сессии.'}</div>
+
+      <div className="character-insight-stack">
+        {strongTopics.length > 0 && (
+          <div className="character-insight-line">
+            <strong>Сильные темы:</strong> {strongTopics.join(' · ')}
+          </div>
+        )}
+        {entity.summary && (
+          <div className="character-insight-line">
+            <strong>Обычно привносит:</strong> {entity.summary}
+          </div>
+        )}
+        {entity.lastNote && (
+          <div className="character-insight-line">
+            <strong>Ролевой след:</strong> {entity.lastNote}
+          </div>
+        )}
+      </div>
 
       <div className="stat-grid">
         {Object.entries(STAT_LABELS).map(([key, label]) => (
@@ -80,6 +117,7 @@ function CharacterCard({ entity, actions = [], selectable, selected, onToggleSel
               key={action.label}
               className={`pixel-btn ${action.variant || 'ghost'}`}
               onClick={action.onClick}
+              data-hint={action.hint}
             >
               {action.label}
             </button>
@@ -238,11 +276,13 @@ export default function InventoryDrawer({
                 {
                   label: 'За стол',
                   onClick: () => onAddFromInventory([profile.id]),
+                  hint: 'Вернуть сохранённого персонажа из инвентаря за текущий круглый стол.',
                 },
                 {
                   label: 'Удалить из инвентаря',
                   variant: 'danger',
                   onClick: () => onDeleteProfile(profile.id),
+                  hint: 'Удалить сохранённый профиль персонажа и его привязанные данные из инвентаря.',
                 },
               ]}
             />

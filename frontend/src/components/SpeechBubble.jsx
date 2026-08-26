@@ -87,7 +87,7 @@ export default function SpeechBubble({ text, isThinking, isSpeaking, position, d
 
   const style = {
     position: 'absolute',
-    zIndex: 100,
+    zIndex: 320,
   }
 
   if (isTop) {
