@@ -41,6 +41,23 @@ def iter_custom_instances() -> list[CustomOpenAIProvider]:
     return list(_CUSTOM_INSTANCES.values())
 
 
+# Последний точный usage от шлюзов (OpenRouter и совместимые): ключ (имя, модель).
+_LAST_USAGE: dict[tuple[str, str], dict] = {}
+
+
+def record_last_usage(provider_name: str | None, model: str | None, usage: dict) -> None:
+    if provider_name and model and isinstance(usage, dict):
+        _LAST_USAGE[(provider_name, model)] = {
+            "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+            "completion_tokens": int(usage.get("completion_tokens") or 0),
+            "cost": float(usage["cost"]) if isinstance(usage.get("cost"), (int, float)) else None,
+        }
+
+
+def get_last_usage(provider_name: str | None, model: str | None) -> dict | None:
+    return _LAST_USAGE.get((provider_name, model))
+
+
 def get_provider(name: str):
     if isinstance(name, str) and name.startswith("custom:"):
         instance = _CUSTOM_INSTANCES.get(name)

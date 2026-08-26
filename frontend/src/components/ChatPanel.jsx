@@ -70,6 +70,21 @@ export default function ChatPanel({
       ? 'Проверка фактов поставлена в очередь.'
       : factCheck?.summary
   const shouldShowAnalytics = canGenerateReport || hasReport || reportGenerating || reportError || hasFactCheck || factCheckError
+  const [tokenStats, setTokenStats] = useState(null)
+
+  useEffect(() => {
+    if (!session?.id || !shouldShowAnalytics) return
+    let cancelled = false
+    fetch(`/api/stats/tokens/${session.id}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!cancelled && data && data.total?.calls > 0) setTokenStats(data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [session?.id, shouldShowAnalytics])
 
   useEffect(() => {
     if (autoScroll) {
@@ -265,6 +280,15 @@ export default function ChatPanel({
                     </div>
                   </details>
                 )}
+              </div>
+            )}
+
+            {tokenStats && (
+              <div className="chat-token-stats" data-hint="Расход токенов за сессию по данным провайдеров (или оценка, если провайдер не отдаёт usage).">
+                ⛁ Токены за сессию: {tokenStats.total.promptTokens} запрос / {tokenStats.total.completionTokens} ответ
+                {' · '}{tokenStats.total.calls} вызов(ов)
+                {tokenStats.total.cost != null && ` · ≈$${Number(tokenStats.total.cost).toFixed(4)}`}
+                {!tokenStats.total.estimated ? ' · точно' : ' · оценка'}
               </div>
             )}
 

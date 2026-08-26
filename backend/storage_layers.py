@@ -361,6 +361,7 @@ class SchemaManager:
         self._ensure_column("observer_reviews", "final_reason", "ALTER TABLE observer_reviews ADD COLUMN final_reason TEXT NOT NULL DEFAULT ''")
         self._ensure_column("observer_reviews", "missing_expert_hint", "ALTER TABLE observer_reviews ADD COLUMN missing_expert_hint TEXT NOT NULL DEFAULT ''")
         self._ensure_column("observer_reviews", "roster_advice_json", "ALTER TABLE observer_reviews ADD COLUMN roster_advice_json TEXT NOT NULL DEFAULT '{}'")
+        self._ensure_column("token_usage", "cost", "ALTER TABLE token_usage ADD COLUMN cost REAL")
 
     def _columns(self, table: str) -> set[str]:
         return {row["name"] for row in self.conn.execute(f"PRAGMA table_info({table})").fetchall()}

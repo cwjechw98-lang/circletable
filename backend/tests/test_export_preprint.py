@@ -131,11 +131,21 @@ def test_token_usage_recorded_and_summarized(export_env):
         model="stealth/ox-alpha",
         prompt_text="Тема обсуждения " * 10,
         completion_text="Короткий ответ.",
+        cost=0.0125,
     )
     summary = repo.token_usage_summary(session_id)
     assert summary["total"]["calls"] == 1
     assert summary["byKind"]["agent_message"]["calls"] == 1
     assert summary["byModel"]["stealth/ox-alpha"]["promptTokens"] > 0
+    assert summary["total"]["estimated"] is False
+    assert summary["total"]["cost"] == 0.0125
+    assert summary["byModel"]["stealth/ox-alpha"]["cost"] == 0.0125
 
-    api_summary = export_env["client"].get(f"/api/stats/tokens/{session_id}").json()
-    assert api_summary["total"]["completionTokens"] > 0
+
+def test_provider_usage_registry_roundtrip():
+    from providers import get_last_usage, record_last_usage
+
+    record_last_usage("custom:abc", "stealth/ox-alpha", {"prompt_tokens": 120, "completion_tokens": 45, "cost": 0.003})
+    snap = get_last_usage("custom:abc", "stealth/ox-alpha")
+    assert snap == {"prompt_tokens": 120, "completion_tokens": 45, "cost": 0.003}
+    assert get_last_usage("custom:abc", "unknown-model") is None

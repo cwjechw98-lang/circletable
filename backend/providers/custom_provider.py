@@ -61,11 +61,27 @@ class CustomOpenAIProvider:
             "stream": True,
             "max_tokens": 400,
             "messages": messages,
+            # Точный usage последним чанком (OpenRouter/OpenAI-совместимые).
+            "stream_options": {"include_usage": True},
         }
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
+        full_text = ""
+        try:
+            full_text = await self._stream_once(model, body, headers, on_token)
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status in (400, 422):
+                # Шлюз не знает stream_options — повторяем без него.
+                body.pop("stream_options", None)
+                full_text = await self._stream_once(model, body, headers, on_token)
+            else:
+                raise
+        return full_text
+
+    async def _stream_once(self, model: str, body: dict, headers: dict, on_token) -> str:
         full_text = ""
         async with httpx.AsyncClient(timeout=90.0) as client:
             async with client.stream("POST", f"{self.base_url}/chat/completions", json=body, headers=headers) as resp:
@@ -80,6 +96,10 @@ class CustomOpenAIProvider:
                         data = json.loads(payload)
                     except json.JSONDecodeError:
                         continue
+                    usage = data.get("usage")
+                    if usage:
+                        from providers import record_last_usage
+                        record_last_usage(self.name, model, usage)
                     choices = data.get("choices", [])
                     if choices:
                         token = choices[0].get("delta", {}).get("content")

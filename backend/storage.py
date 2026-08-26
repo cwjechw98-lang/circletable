@@ -722,44 +722,55 @@ class Repository:
         model: str | None,
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        cost: float | None = None,
     ):
         self.conn.execute(
             """
             INSERT INTO token_usage
-                (id, session_id, room_id, round_number, kind, provider, model, prompt_tokens, completion_tokens, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, session_id, room_id, round_number, kind, provider, model, prompt_tokens, completion_tokens, cost, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (id, session_id, room_id, round_number, kind, provider, model, prompt_tokens, completion_tokens, utc_now()),
+            (id, session_id, room_id, round_number, kind, provider, model, prompt_tokens, completion_tokens, cost, utc_now()),
         )
         self.conn.commit()
 
     def token_usage_summary(self, session_id: str) -> dict:
         rows = self.conn.execute(
-            "SELECT kind, model, round_number, prompt_tokens, completion_tokens FROM token_usage WHERE session_id = ?",
+            "SELECT kind, model, round_number, prompt_tokens, completion_tokens, cost FROM token_usage WHERE session_id = ?",
             (session_id,),
         ).fetchall()
         by_kind: dict[str, dict] = {}
         by_model: dict[str, dict] = {}
         by_round: dict[int, dict] = {}
         total_prompt = total_completion = 0
+        total_cost = 0.0
+        has_cost = False
         for row in rows:
+            row_cost = row["cost"]
             for bucket, key in ((by_kind, row["kind"]), (by_model, row["model"] or "—")):
                 cell = bucket.setdefault(key, {"calls": 0, "promptTokens": 0, "completionTokens": 0})
                 cell["calls"] += 1
                 cell["promptTokens"] += row["prompt_tokens"]
                 cell["completionTokens"] += row["completion_tokens"]
+                if row_cost is not None:
+                    has_cost = True
+                    cell["cost"] = round(cell.get("cost", 0.0) + float(row_cost), 6)
             rcell = by_round.setdefault(row["round_number"] or 0, {"calls": 0, "promptTokens": 0, "completionTokens": 0})
             rcell["calls"] += 1
             rcell["promptTokens"] += row["prompt_tokens"]
             rcell["completionTokens"] += row["completion_tokens"]
             total_prompt += row["prompt_tokens"]
             total_completion += row["completion_tokens"]
+            if row_cost is not None:
+                total_cost += float(row_cost)
         return {
             "sessionId": session_id,
             "total": {
                 "calls": len(rows),
                 "promptTokens": total_prompt,
                 "completionTokens": total_completion,
+                "estimated": not has_cost,
+                **({"cost": round(total_cost, 6)} if has_cost else {}),
             },
             "byKind": by_kind,
             "byModel": by_model,

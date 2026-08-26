@@ -4639,6 +4639,15 @@ body.is-resizing-chat * {
   50% { opacity: 0.65; }
 }
 
+/* Стоимость сессии в блоке отчёта. */
+.chat-token-stats {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  padding: 6px 10px;
+  border: 1px dashed var(--border);
+  background: var(--surface);
+}
+
 /* Онбординг-тур: приветственная карточка новичка. */
 .onboarding-overlay {
   position: fixed;

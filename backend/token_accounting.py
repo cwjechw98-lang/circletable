@@ -35,6 +35,7 @@ def record_usage(
     completion_text: str = "",
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
+    cost: float | None = None,
 ) -> None:
     """Одна строка расхода. Никогда не ломает основной поток дебатов."""
     try:
@@ -48,6 +49,7 @@ def record_usage(
             model=model,
             prompt_tokens=prompt_tokens if prompt_tokens is not None else estimate_tokens(prompt_text),
             completion_tokens=completion_tokens if completion_tokens is not None else estimate_tokens(completion_text),
+            cost=cost,
         )
     except Exception:
         logger.warning("token_usage: не удалось записать расход (%s/%s)", kind, model, exc_info=True)

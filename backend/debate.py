@@ -19,7 +19,7 @@ from knowledge.lightrag_adapter import (
     query_graph,
 )
 from meta_memory import format_insight_recall, select_relevant_session_insights, store_session_memories
-from providers import get_provider
+from providers import get_last_usage, get_provider
 from storage import Repository, utc_now
 from token_accounting import record_usage
 
@@ -1147,6 +1147,7 @@ class DebateEngine:
             "content": accumulated,
             "mentions": mentions,
         }
+        real = get_last_usage(participant.get("provider"), participant.get("model"))
         record_usage(
             self.repo,
             session_id=prepared.session_id,
@@ -1155,6 +1156,9 @@ class DebateEngine:
             kind="agent_message",
             provider=participant.get("provider"),
             model=participant.get("model"),
+            prompt_tokens=real["prompt_tokens"] if real else None,
+            completion_tokens=real["completion_tokens"] if real else None,
+            cost=real.get("cost") if real else None,
             prompt_text="\n".join(
                 str(item.get("content") or "")
                 for item in (context.get("history") or [])
@@ -1266,6 +1270,7 @@ class DebateEngine:
             author_type="agent",
             participant_id=reactor["id"],
         )
+        real_reaction = get_last_usage(reactor.get("provider"), reactor.get("model"))
         record_usage(
             self.repo,
             session_id=session_id,
@@ -1274,6 +1279,9 @@ class DebateEngine:
             kind="agent_reaction",
             provider=reactor.get("provider"),
             model=reactor.get("model"),
+            prompt_tokens=real_reaction["prompt_tokens"] if real_reaction else None,
+            completion_tokens=real_reaction["completion_tokens"] if real_reaction else None,
+            cost=real_reaction.get("cost") if real_reaction else None,
             prompt_text=prompt,
             completion_text=text,
         )
