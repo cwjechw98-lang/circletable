@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import random
+import re
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
@@ -18,6 +19,7 @@ from knowledge.lightrag_adapter import (
     query_graph,
 )
 from meta_memory import format_insight_recall, select_relevant_session_insights, store_session_memories
+from providers import get_provider
 from storage import Repository, utc_now
 
 
@@ -26,6 +28,22 @@ logger = logging.getLogger(__name__)
 # Экономия токенов: сколько свежих сообщений стола видит агент целиком.
 # Более старые реплики уже сжаты в хронике сессии (session_chronicle).
 AGENT_HISTORY_LIMIT = int(os.getenv("AGENT_HISTORY_LIMIT") or 12)
+
+# Кросс-диалог: реакции-перебивания между репликами.
+CROSS_DIALOG_ENABLED = os.getenv("CROSS_DIALOG_ENABLED", "1") not in {"0", "false", "no"}
+REACTION_CHANCE = float(os.getenv("REACTION_CHANCE") or 0.25)
+REACTION_MAX_WORDS = int(os.getenv("REACTION_MAX_WORDS") or 25)
+
+_MENTION_RE = re.compile(r"@([\w][\w\-]{1,30})")
+
+
+def parse_mentions(text: str, names: list[str]) -> list[str]:
+    """Имена участников, явно упомянутые через @Имя."""
+    if not text:
+        return []
+    found = {match.group(1).lower() for match in _MENTION_RE.finditer(text)}
+    return [name for name in names if name.lower() in found]
+
 
 BroadcastFn = Callable[[dict], Awaitable[None]]
 
@@ -907,6 +925,7 @@ class DebateEngine:
                         break
 
                     if self._round_state.next_index < len(self._round_state.order):
+                        await self._maybe_reaction(room_id, session_id, self._round_state, prepared.participant)
                         density = self._density_profile(room_id)
                         await asyncio.sleep(random.uniform(density["between_turn_min"], density["between_turn_max"]))
 
@@ -1050,6 +1069,11 @@ class DebateEngine:
         inter_turn_gap_seconds: float | None,
     ):
         participant = prepared.participant
+        mentions = parse_mentions(
+            accumulated,
+            [item.get("name") or "" for item in self._round_state.order]
+            if self._round_state else [],
+        )
         payload = {
             "type": "agent_message",
             "agent_id": participant["id"],
@@ -1071,6 +1095,8 @@ class DebateEngine:
             "round": prepared.round_number,
             "author_type": "agent",
         }
+        if mentions:
+            payload["mentions"] = mentions
         if inter_turn_gap_seconds is not None:
             payload["interTurnGapSeconds"] = round(inter_turn_gap_seconds, 1)
         if agent.last_tool_call:
@@ -1113,8 +1139,120 @@ class DebateEngine:
             timing_payload,
         )
         await self._broadcast(stored)
+        if mentions and self._round_state and self._round_state.round_id == prepared.round_id:
+            self._apply_mention_priority(self._round_state, mentions)
+        self._last_message_for_reaction = {
+            "speaker": participant,
+            "content": accumulated,
+            "mentions": mentions,
+        }
         self._last_turn_committed_at = asyncio.get_running_loop().time()
         self._round_started_at = None
+
+    def _apply_mention_priority(self, round_state: RoundState, mentions: list[str]):
+        """Адресованный в @упоминании получает слово следующим (обмен позициями)."""
+        start = round_state.next_index
+        if start >= len(round_state.order) - 0 or start >= len(round_state.order):
+            return
+        current = round_state.order[start]
+        if (current.get("name") or "").lower() in {m.lower() for m in mentions}:
+            return
+        for idx in range(start + 1, len(round_state.order)):
+            candidate = round_state.order[idx]
+            if (candidate.get("name") or "").lower() in {m.lower() for m in mentions}:
+                round_state.order[start], round_state.order[idx] = candidate, current
+                break
+
+    async def _maybe_reaction(self, room_id, session_id, round_state: RoundState, speaker_participant: dict):
+        """Короткая реакция-перебивание от другого агента между репликами."""
+        if not CROSS_DIALOG_ENABLED:
+            return None
+        enabled = self.repo.get_setting("cross_dialog_enabled")
+        if enabled is not None and str(enabled).strip() != "" and str(enabled).strip().lower() in {"0", "false", "no"}:
+            return None
+        chance = REACTION_CHANCE
+        raw_chance = self.repo.get_setting("reaction_chance")
+        if raw_chance not in (None, ""):
+            try:
+                chance = max(0.0, min(float(raw_chance), 1.0))
+            except (TypeError, ValueError):
+                pass
+        last = getattr(self, "_last_message_for_reaction", None)
+        if not last or random.random() > chance:
+            return None
+
+        candidates = [
+            item for item in round_state.order
+            if (item.get("name") or "") != (speaker_participant.get("name") or "")
+        ]
+        if not candidates:
+            return None
+        next_idx = min(round_state.next_index, len(round_state.order) - 1)
+        next_scheduled_id = round_state.order[next_idx].get("id")
+        mention_names = {(item or "").lower() for item in last.get("mentions") or []}
+        weights = []
+        for item in candidates:
+            weight = 3.0 if (item.get("name") or "").lower() in mention_names else 1.0
+            if item.get("id") == next_scheduled_id:
+                weight *= 0.15
+            weights.append(weight)
+        reactor = random.choices(candidates, weights=weights, k=1)[0]
+
+        prompt = (
+            f"Ты {reactor.get('name')}. Только что выступил {speaker_participant.get('name')}:\n"
+            f"«{(last.get('content') or '')[:400]}»\n\n"
+            f"Ответь ОДНОЙ короткой фразой (до {REACTION_MAX_WORDS} слов): живое согласие, "
+            f"возражение или острая деталь по сути. Без приветствий и представлений."
+        )
+        try:
+            provider = get_provider(reactor.get("provider") or "ollama")
+            raw_text = await asyncio.wait_for(
+                provider.stream_chat(reactor.get("model") or "", [{"role": "user", "content": prompt}], None),
+                timeout=45,
+            )
+        except Exception:
+            logger.warning("Реакция %s не удалась", reactor.get("name"), exc_info=True)
+            return None
+        text = (raw_text or "").strip().splitlines()[0].strip().strip('"«»')
+        if not text:
+            return None
+        words = text.split()
+        if len(words) > REACTION_MAX_WORDS:
+            text = " ".join(words[:REACTION_MAX_WORDS]) + "…"
+
+        payload = {
+            "type": "agent_reaction",
+            "agent_id": reactor["id"],
+            "participant_id": reactor["id"],
+            "profile_id": reactor.get("profileId"),
+            "agent_name": reactor.get("name"),
+            "name": reactor.get("name"),
+            "agent_emoji": reactor.get("emoji"),
+            "emoji": reactor.get("emoji"),
+            "mascot": reactor.get("mascot"),
+            "role": reactor.get("role"),
+            "specialty": reactor.get("specialty"),
+            "specialtyLabel": reactor.get("specialtyLabel"),
+            "provider": reactor.get("provider"),
+            "model": reactor.get("model"),
+            "content": text,
+            "replyTo": speaker_participant.get("name"),
+            "emotion": detect_emotion(text),
+            "round": round_state.round_number,
+            "author_type": "agent",
+        }
+        stored = self.repo.append_message(
+            room_id,
+            session_id,
+            payload,
+            round_id=round_state.round_id,
+            round_number=round_state.round_number,
+            message_type="agent_reaction",
+            author_type="agent",
+            participant_id=reactor["id"],
+        )
+        await self._broadcast(stored)
+        return stored
         await self._store_profile_memory(prepared.room_id, prepared.round_number, participant, context, accumulated)
 
     async def _inject_planned_events(self, room_id: str, session_id: str, round_id: str, round_number: int):

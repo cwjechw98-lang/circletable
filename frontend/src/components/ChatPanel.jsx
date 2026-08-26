@@ -12,6 +12,19 @@ const FACT_CHECK_LABELS = {
   insufficient_evidence: 'Недостаточно данных',
 }
 
+const MENTION_RE = /(@[\w][\w-]{0,30})/g
+
+export function renderWithMentions(content) {
+  const text = String(content || '')
+  const parts = text.split(MENTION_RE)
+  if (parts.length === 1) return text
+  return parts.map((part, index) => (
+    part.startsWith('@')
+      ? <span key={`${index}-${part}`} className="chat-mention">{part}</span>
+      : part
+  ))
+}
+
 function formatScopeLabel(factCheck) {
   if (!factCheck) return ''
   if (factCheck.scope === 'round' && factCheck.targetRound) {
@@ -353,7 +366,10 @@ export default function ChatPanel({
                   ))}
                 </div>
               )}
-              <div className="chat-msg-body">{msg.content}</div>
+              {msg.type === 'agent_reaction' && msg.replyTo && (
+                <div className="chat-reaction-tag">⚡ реакция на @{msg.replyTo}</div>
+              )}
+              <div className="chat-msg-body">{renderWithMentions(msg.content)}</div>
             </div>
           )
         })}

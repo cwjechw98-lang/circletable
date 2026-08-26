@@ -18,6 +18,64 @@ export default function ProvidersDrawer({ open, onClose, providers, onRefreshPro
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [testingId, setTestingId] = useState(null)
+  const [settings, setSettings] = useState(null)
+  const [savingSettings, setSavingSettings] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    fetch('/api/settings')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (data?.settings) setSettings(data.settings)
+      })
+      .catch(() => {})
+  }, [open])
+
+  function updateSetting(key, value) {
+    setSettings((current) => ({ ...(current || {}), [key]: value }))
+  }
+
+  async function saveSettings() {
+    if (!settings) return
+    setSavingSettings(true)
+    setError('')
+    try {
+      const payload = {}
+      Object.entries(settings).forEach(([key, value]) => {
+        if (value !== '' && !(typeof value === 'string' && (value.startsWith('...') || value === '*'))) {
+          payload[key] = value
+        }
+      })
+      const response = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: payload }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data?.detail || 'Не удалось сохранить настройки')
+      setNotice('Настройки сохранены и применены.')
+      onRefreshProviders?.()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingSettings(false)
+    }
+  }
+
+  async function testMemoryLlm() {
+    setError('')
+    setNotice('')
+    try {
+      // Сначала сохраняем введённое, затем тестируем фактическую конфигурацию.
+      await saveSettings()
+      const response = await fetch('/api/settings/test-memory-llm', { method: 'POST' })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data?.detail || 'LLM памяти недоступна')
+      setNotice(`LLM памяти отвечает: ${data.model} → «${data.sample}»`)
+    } catch (err) {
+      setError(err.message)
+    }
+  }
 
   useEffect(() => {
     if (!open) return
@@ -125,6 +183,68 @@ export default function ProvidersDrawer({ open, onClose, providers, onRefreshPro
         <div className="drawer-content lab-content">
           {error && <div className="drawer-empty lab-error">{error}</div>}
           {notice && !error && <div className="drawer-empty lab-notice">{notice}</div>}
+
+          <div className="dossier-section-title">Настройки системы</div>
+          <div className="providers-form" style={{ marginBottom: 'calc(var(--pixel) * 3)' }}>
+            <label className="providers-form-field">
+              <span>LLM памяти: Base URL (OpenAI-совместимый)</span>
+              <input
+                className="mini-input"
+                value={settings?.memory_llm_base_url ?? ''}
+                onChange={(event) => updateSetting('memory_llm_base_url', event.target.value)}
+                placeholder="https://openrouter.ai/api/v1"
+              />
+            </label>
+            <label className="providers-form-field">
+              <span>LLM памяти: модель</span>
+              <input
+                className="mini-input"
+                value={settings?.memory_llm_model ?? ''}
+                onChange={(event) => updateSetting('memory_llm_model', event.target.value)}
+                placeholder="deepseek/deepseek-chat-v4"
+              />
+            </label>
+            <label className="providers-form-field">
+              <span>LLM памяти: API-ключ (пусто = не менять)</span>
+              <input
+                className="mini-input"
+                type="password"
+                value={settings?.memory_llm_api_key ?? ''}
+                onChange={(event) => updateSetting('memory_llm_api_key', event.target.value)}
+                placeholder="sk-or-..."
+                autoComplete="off"
+              />
+            </label>
+            <label className="providers-form-field">
+              <span>Кросс-диалог (реакции-перебивания)</span>
+              <select
+                className="mini-input"
+                value={settings?.cross_dialog_enabled ?? '1'}
+                onChange={(event) => updateSetting('cross_dialog_enabled', event.target.value)}
+              >
+                <option value="1">Включены</option>
+                <option value="0">Выключены</option>
+              </select>
+            </label>
+            <label className="providers-form-field">
+              <span>Шанс перебивания (0…1)</span>
+              <input
+                className="mini-input"
+                type="number" min="0" max="1" step="0.05"
+                value={settings?.reaction_chance ?? ''}
+                onChange={(event) => updateSetting('reaction_chance', event.target.value)}
+                placeholder="0.25"
+              />
+            </label>
+            <div className="provider-row-actions">
+              <button className="pixel-btn add" onClick={saveSettings} disabled={savingSettings}>
+                {savingSettings ? 'Сохраняем...' : 'Сохранить настройки'}
+              </button>
+              <button className="pixel-btn ghost" onClick={testMemoryLlm} disabled={savingSettings}>
+                Тест LLM памяти
+              </button>
+            </div>
+          </div>
 
           <div className="dossier-section-title">Активные источники</div>
           <div className="providers-active-list">

@@ -87,29 +87,54 @@ if MEMORY_LLM_BASE_URL.endswith("/chat/completions"):
 MEMORY_LLM_MODEL = os.getenv("MEMORY_LLM_MODEL") or os.getenv("LIGHTRAG_MODEL") or LIGHTRAG_MODEL
 MEMORY_LLM_API_KEY = os.getenv("MEMORY_LLM_API_KEY") or ""
 
+# Runtime-переопределение из UI-настроек (таблица app_settings). Приоритет: override > env > дефолт.
+_MEMORY_OVERRIDE: dict[str, str] = {}
+
+
+def set_memory_llm_config(base_url: str | None = None, model: str | None = None, api_key: str | None = None):
+    """UI-настройки памяти: непустые значения перекрывают env/дефолты, '' возвращает к дефолту."""
+    if base_url is not None:
+        _MEMORY_OVERRIDE["base_url"] = base_url.strip().rstrip("/")
+    if model is not None:
+        _MEMORY_OVERRIDE["model"] = model.strip()
+    if api_key is not None:
+        _MEMORY_OVERRIDE["api_key"] = api_key
+
+
+def get_memory_llm_config() -> dict[str, str]:
+    base_url = _MEMORY_OVERRIDE.get("base_url") or MEMORY_LLM_BASE_URL
+    if base_url.endswith("/chat/completions"):
+        base_url = base_url[: -len("/chat/completions")]
+    return {
+        "base_url": base_url,
+        "model": _MEMORY_OVERRIDE.get("model") or MEMORY_LLM_MODEL,
+        "api_key": _MEMORY_OVERRIDE.get("api_key") if _MEMORY_OVERRIDE.get("api_key") is not None else MEMORY_LLM_API_KEY,
+    }
+
 
 async def _memory_llm_call(messages: list[dict[str, str]], temperature: float) -> str:
+    config = get_memory_llm_config()
     payload = {
-        "model": MEMORY_LLM_MODEL,
+        "model": config["model"],
         "messages": messages,
         "temperature": temperature,
         "stream": False,
     }
     headers = {"Content-Type": "application/json"}
-    if MEMORY_LLM_API_KEY:
-        headers["Authorization"] = f"Bearer {MEMORY_LLM_API_KEY}"
+    if config["api_key"]:
+        headers["Authorization"] = f"Bearer {config['api_key']}"
     last_error: Exception | None = None
     for attempt in range(2):
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
-                response = await client.post(f"{MEMORY_LLM_BASE_URL}/chat/completions", json=payload, headers=headers)
+                response = await client.post(f"{config['base_url']}/chat/completions", json=payload, headers=headers)
                 response.raise_for_status()
                 data = response.json()
             return data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
         except Exception as exc:  # noqa: BLE001 - одна повторная попытка на сетевые сбои
             last_error = exc
             logger.warning("Память: вызов LLM %s/%s не удался (попытка %d): %s",
-                           MEMORY_LLM_BASE_URL, MEMORY_LLM_MODEL, attempt + 1, exc)
+                           config["base_url"], config["model"], attempt + 1, exc)
             await asyncio.sleep(1.5)
     raise last_error  # type: ignore[misc]
 

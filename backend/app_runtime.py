@@ -101,6 +101,9 @@ async def build_default_runtime() -> AppRuntime:
     repository.bootstrap(default_profiles, observer_provider, observer_model)
     repository.normalize_incomplete_sessions()
     set_custom_providers(repository.list_custom_provider_records())
+    from http_api.routes_settings import _apply_settings_overrides
+
+    _apply_settings_overrides(repository)
 
     manager = ConnectionManager()
     engine = DebateEngine(broadcast=manager.broadcast, repository=repository)

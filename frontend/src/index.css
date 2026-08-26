@@ -4467,6 +4467,19 @@ body.is-resizing-chat * {
   color: var(--muted);
 }
 
+/* ===================== Кросс-диалог ===================== */
+
+.chat-mention {
+  color: var(--gold);
+}
+
+.chat-reaction-tag {
+  margin-top: calc(var(--pixel));
+  font-family: var(--font-pixel);
+  font-size: calc(7px * var(--ui-font-scale));
+  color: var(--cyan);
+}
+
 .dossier-achievements,
 .dossier-notes {
   list-style: none;

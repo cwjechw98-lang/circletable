@@ -686,6 +686,30 @@ class Repository:
         self.conn.commit()
         return cursor.rowcount > 0
 
+    # --- Настройки приложения (UI-editable) ---
+
+    def get_setting(self, key: str, default=None):
+        row = self.conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?",
+            (key,),
+        ).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str):
+        self.conn.execute(
+            """
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (key, value, utc_now()),
+        )
+        self.conn.commit()
+
+    def all_settings(self) -> dict[str, str]:
+        rows = self.conn.execute("SELECT key, value FROM app_settings").fetchall()
+        return {row["key"]: row["value"] for row in rows}
+
     def _unique_custom_specialty_value(self, label: str, value: str | None = None) -> str:
         base = re.sub(r"[^a-z0-9-]+", "-", (value or "").lower()).strip("-")
         if not base:

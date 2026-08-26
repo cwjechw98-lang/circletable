@@ -274,6 +274,12 @@ CREATE TABLE IF NOT EXISTS custom_providers (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_profiles_saved_updated
     ON character_profiles(is_saved, updated_at, name);
 CREATE INDEX IF NOT EXISTS idx_room_participants_room_status_position
