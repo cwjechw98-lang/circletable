@@ -627,6 +627,65 @@ class Repository:
             for group_label, options in grouped.items()
         ]
 
+    # --- Кастомные провайдеры (OpenAI-совместимые) ---
+
+    def list_custom_provider_records(self) -> list[dict]:
+        """Полные записи включая api_key — только для внутренней регистрации."""
+        rows = self.conn.execute(
+            "SELECT * FROM custom_providers ORDER BY created_at ASC"
+        ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "base_url": row["base_url"],
+                "api_key": row["api_key"],
+            }
+            for row in rows
+        ]
+
+    def list_custom_providers(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM custom_providers ORDER BY created_at ASC"
+        ).fetchall()
+        return [self._custom_provider_payload(row) for row in rows]
+
+    def _custom_provider_payload(self, row: sqlite3.Row) -> dict:
+        key = row["api_key"] or ""
+        key_hint = f"...{key[-4:]}" if len(key) > 4 else ("***" if key else "")
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "baseUrl": row["base_url"],
+            "keyHint": key_hint,
+            "createdAt": row["created_at"],
+        }
+
+    def create_custom_provider(self, name: str, base_url: str, api_key: str = "") -> dict:
+        provider_id = make_id("prov")
+        now = utc_now()
+        self.conn.execute(
+            """
+            INSERT INTO custom_providers (id, name, base_url, api_key, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (provider_id, name, base_url.rstrip("/"), api_key, now, now),
+        )
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT * FROM custom_providers WHERE id = ?",
+            (provider_id,),
+        ).fetchone()
+        return self._custom_provider_payload(row)
+
+    def delete_custom_provider(self, provider_id: str) -> bool:
+        cursor = self.conn.execute(
+            "DELETE FROM custom_providers WHERE id = ?",
+            (provider_id,),
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
     def _unique_custom_specialty_value(self, label: str, value: str | None = None) -> str:
         base = re.sub(r"[^a-z0-9-]+", "-", (value or "").lower()).strip("-")
         if not base:

@@ -13,7 +13,9 @@ from http_api.deps import get_ws_runtime
 from http_api.helpers import build_init_payload
 from http_api.routes_casting import router as casting_router
 from http_api.routes_characters import router as characters_router
+from http_api.routes_custom_providers import router as custom_providers_router
 from http_api.routes_lab import router as lab_router
+from http_api.routes_orchestrator import router as orchestrator_router
 from http_api.routes_rooms import router as rooms_router
 from http_api.routes_sessions import router as sessions_router
 from http_api.routes_system import router as system_router
@@ -48,6 +50,8 @@ def create_app(*, runtime_factory: RuntimeFactory | None = None) -> FastAPI:
         characters_router,
         sessions_router,
         lab_router,
+        orchestrator_router,
+        custom_providers_router,
     ):
         app_instance.include_router(router)
 

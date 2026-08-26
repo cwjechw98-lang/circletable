@@ -6,6 +6,7 @@ import RoundAnnounce from './components/RoundAnnounce.jsx'
 import RoomsDrawer from './components/RoomsDrawer.jsx'
 import InventoryDrawer from './components/InventoryDrawer.jsx'
 import LabDrawer from './components/LabDrawer.jsx'
+import ProvidersDrawer from './components/ProvidersDrawer.jsx'
 import TimedHintLayer from './components/TimedHintLayer.jsx'
 import TopicFocusOverlay from './components/TopicFocusOverlay.jsx'
 import useAppCommands from './hooks/useAppCommands.js'
@@ -120,6 +121,7 @@ export default function App() {
   const [roomsOpen, setRoomsOpen] = useState(false)
   const [inventoryOpen, setInventoryOpen] = useState(false)
   const [labOpen, setLabOpen] = useState(false)
+  const [providersOpen, setProvidersOpen] = useState(false)
   const [theme, setTheme] = useState(readTheme)
   const [uiFontScale, setUiFontScale] = useState(readUiFontScale)
   const [fontPanelOpen, setFontPanelOpen] = useState(false)
@@ -423,6 +425,13 @@ export default function App() {
         onClose={() => setLabOpen(false)}
       />
 
+      <ProvidersDrawer
+        open={providersOpen}
+        onClose={() => setProvidersOpen(false)}
+        providers={providers}
+        onRefreshProviders={() => sendMsg({ type: 'get_providers' })}
+      />
+
       <header className="app-header">
         <div>
           <div className="header-title">⚔ Круглый стол ИИ ⚔</div>
@@ -512,6 +521,11 @@ export default function App() {
           onOpenRooms={() => setRoomsOpen(true)}
           onOpenInventory={() => setInventoryOpen(true)}
           onOpenLab={() => setLabOpen(true)}
+          onOpenProviders={() => {
+            setProvidersOpen(true)
+            if (!connected) return
+            sendMsg({ type: 'get_providers' })
+          }}
           onRefreshProviders={() => {
             setRefreshingProviders(true)
             sendMsg({ type: 'get_providers' })

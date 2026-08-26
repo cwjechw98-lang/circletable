@@ -77,6 +77,8 @@ export default function CastingAssistantModal({
   const [count, setCount] = useState(4)
   const [drafts, setDrafts] = useState([])
   const [loading, setLoading] = useState(false)
+  const [recommending, setRecommending] = useState(false)
+  const [modelRecs, setModelRecs] = useState({})
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [contextCollapsed, setContextCollapsed] = useState(false)
@@ -234,6 +236,7 @@ export default function CastingAssistantModal({
         model: draft.model || assistantModel,
       }, index, assistantProvider, assistantModel, specialtyValues))
       setDrafts(nextDrafts)
+      setModelRecs({})
       if (nextDrafts.length > 0) {
         setTopicCollapsed(true)
         if (typeof window !== 'undefined') {
@@ -264,6 +267,51 @@ export default function CastingAssistantModal({
       }
       return normalizeDraft(merged, draftIndex, assistantProvider, assistantModel, specialtyValues)
     }))
+  }
+
+  async function recommendModels() {
+    if (drafts.length === 0) return
+    setRecommending(true)
+    setError('')
+    setMessage('Оркестратор сверяет показатели Artificial Analysis и пингует кандидатов...')
+    try {
+      const response = await fetch('/api/orchestrator/recommend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          characters: drafts.map((draft) => ({ name: draft.name, role: draft.role })),
+          ping: true,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data?.detail || 'Оркестратор не смог подобрать модели.')
+      }
+      const availableSet = new Set(availableProviders)
+      const nextRecs = {}
+      data.recommendations?.forEach((rec, index) => {
+        const draft = drafts[index]
+        if (!draft || !rec.choice) return
+        if (!availableSet.has(rec.choice.provider)) return
+        updateDraft(index, { provider: rec.choice.provider, model: rec.choice.model })
+        nextRecs[draft.id] = {
+          profile: rec.profile,
+          aa: rec.choice.aa,
+          ping: rec.choice.ping,
+        }
+      })
+      setModelRecs(nextRecs)
+      setMessage(
+        data.catalogError
+          ? `Модели подобраны без каталога AA (${data.catalogError}).`
+          : 'Модели подобраны по данным Artificial Analysis и проверены живым пингом.',
+      )
+    } catch (err) {
+      setError(err.message || 'Ошибка подбора моделей.')
+      setMessage('')
+    } finally {
+      setRecommending(false)
+    }
   }
 
   function removeDraft(index) {
@@ -440,6 +488,22 @@ export default function CastingAssistantModal({
           </div>
         )}
 
+        {drafts.length > 0 && (
+          <div className="assistant-model-toolbar">
+            <button
+              className="pixel-btn sync"
+              onClick={recommendModels}
+              disabled={recommending || loading}
+              data-hint="Оркестратор подбирает каждому персонажу модель по показателям Artificial Analysis (интеллект, скорость, цена) и проверяет кандидатов живым пингом."
+            >
+              {recommending ? 'Подбираем...' : '⚡ Подобрать модели'}
+            </button>
+            <span className="assistant-model-toolbar-hint">
+              Данные Artificial Analysis + пинг доступных провайдеров. Профиль учитывает роль героя.
+            </span>
+          </div>
+        )}
+
         <div className="assistant-draft-list" ref={draftListRef}>
           {drafts.length === 0 && (
             <div className="drawer-empty">
@@ -525,6 +589,30 @@ export default function CastingAssistantModal({
                 <div className="assistant-draft-meta">
                   {getRoleLabel(draft.role)} · {getSpecialtyLabel(draft.specialty, draft.specialtyLabel || specialtyLabels[draft.specialty])} · {draft.provider}/{draft.model || 'модель не выбрана'}
                 </div>
+
+                {modelRecs[draft.id] && (
+                  <div className="assistant-model-rec">
+                    <span className="assistant-model-rec-profile">профиль: {modelRecs[draft.id].profile}</span>
+                    {modelRecs[draft.id].aa && (
+                      <>
+                        <span title="Индекс интеллекта Artificial Analysis">IQ {modelRecs[draft.id].aa.intelligenceIndex}</span>
+                        {!!modelRecs[draft.id].aa.outputTokensPerSecond && (
+                          <span title="Медианная скорость генерации">{Math.round(modelRecs[draft.id].aa.outputTokensPerSecond)} tok/s</span>
+                        )}
+                        {modelRecs[draft.id].aa.blendedPricePer1m != null && (
+                          <span title="Средняя цена за 1M токенов (бленд 3:1)">${modelRecs[draft.id].aa.blendedPricePer1m}/M</span>
+                        )}
+                      </>
+                    )}
+                    {modelRecs[draft.id].ping?.latencyMs != null && (
+                      <span className={modelRecs[draft.id].ping.alive ? 'is-alive' : 'is-dead'}>
+                        {modelRecs[draft.id].ping.alive
+                          ? `пинг ${modelRecs[draft.id].ping.latencyMs} мс`
+                          : 'не ответила'}
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {(draft.whyRole || draft.whyModel || draft.memoryHint) && (
                   <details className="assistant-why-block">

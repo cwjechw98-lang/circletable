@@ -265,6 +265,15 @@ CREATE TABLE IF NOT EXISTS custom_specialties (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS custom_providers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    base_url TEXT NOT NULL,
+    api_key TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_profiles_saved_updated
     ON character_profiles(is_saved, updated_at, name);
 CREATE INDEX IF NOT EXISTS idx_room_participants_room_status_position

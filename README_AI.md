@@ -282,6 +282,25 @@ Frontend:
 - карьерный блок: сессии, раунды, реплики (из `messages` через `room_participants`), число оценок;
 - редактирование профиля по-прежнему в Инвентаре — Лаборатория пока read-only.
 
+### Оркестратор подбора моделей (Artificial Analysis)
+
+Файлы:
+- [backend/artificial_analysis.py](backend/artificial_analysis.py) — клиент Data API (`X-API-Key`, TTL-кэш 12ч), нормализация метрик, профили скоринга smart/fast/cheap/balanced;
+- [backend/model_orchestrator.py](backend/model_orchestrator.py) — сбор кандидатов из доступных провайдеров, сопоставление с каталогом AA по токенам slug, пинг шорт-листа крошечным запросом, выбор лучшей модели на персонажа с учётом роли (`ROLE_PROFILE_HINTS`);
+- [backend/http_api/routes_orchestrator.py](backend/http_api/routes_orchestrator.py) — `/api/orchestrator/status|catalog|ping|recommend`;
+- [frontend/src/components/CastingAssistantModal.jsx](frontend/src/components/CastingAssistantModal.jsx) — кнопка `⚡ Подобрать модели`: оркестратор проставляет каждому черновику провайдера/модель и показывает чипы IQ / tok/s / цену / пинг.
+
+Ключ: переменная окружения `AA_API_KEY`, локально лежит в `backend/.env` (в `.gitignore`, в git не попадает). Без ключа оркестратор продолжает работать на локальных данных без AA-метрик.
+
+### Провайдеры моделей (пресеты и кастомные endpoint'ы)
+
+Файлы:
+- [backend/providers/custom_provider.py](backend/providers/custom_provider.py) — `CustomOpenAIProvider` для любых OpenAI-совместимых `/chat/completions`;
+- [backend/http_api/routes_custom_providers.py](backend/http_api/routes_custom_providers.py) — CRUD `/api/custom-providers`, пресеты `/api/custom-providers/presets` (DeepSeek, OpenRouter, Groq, Mistral, Together, xAI, Gemini OpenAI-compat, Fireworks, LM Studio);
+- таблица БД `custom_providers`; ключи хранятся только в локальной базе, наружу отдаются маской `...последние4`;
+- [frontend/src/components/ProvidersDrawer.jsx](frontend/src/components/ProvidersDrawer.jsx) — кнопка `Провайдеры` в панели управления: статус источников, библиотека пресетов, форма добавления, тест соединения;
+- кастомные провайдеры попадают во все выпадающие списки как `custom:<id>` и понимаются оркестратором и Хрономантом через общий `get_provider`.
+
 ### Панель управления
 
 Файл:

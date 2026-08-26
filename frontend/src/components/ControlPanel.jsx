@@ -116,6 +116,7 @@ export default function ControlPanel({
   onOpenRooms,
   onOpenInventory,
   onOpenLab,
+  onOpenProviders,
   onRefreshProviders,
   onObserverModeChange,
   onDensityModeChange,
@@ -358,6 +359,7 @@ export default function ControlPanel({
         <button className="pixel-btn ghost" onClick={onOpenRooms} data-hint="Открыть список комнат и сохранённых обсуждений.">Комнаты</button>
         <button className="pixel-btn ghost" onClick={onOpenInventory} data-hint="Открыть инвентарь персонажей, скамейку и состав стола.">Инвентарь</button>
         <button className="pixel-btn ghost" onClick={onOpenLab} data-hint="Открыть лабораторию персонажей: досье с эволюцией показателей, ачивками и заметками Хрономанта.">Лаборатория</button>
+        <button className="pixel-btn ghost" onClick={onOpenProviders} data-hint="Провайдеры моделей: статус источников, пресеты (DeepSeek, OpenRouter, Groq и другие) и свои OpenAI-совместимые провайдеры.">Провайдеры</button>
 
         <div className="toolbar-select">
           <span>Режим:</span>

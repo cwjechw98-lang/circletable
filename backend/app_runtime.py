@@ -14,7 +14,7 @@ from defaults import build_default_profiles, pick_observer_provider
 from factcheck import FactCheckService
 from knowledge.graph_builder import GraphBuilder
 from meta_memory import format_insight_recall, select_relevant_session_insights
-from providers import PROVIDERS
+from providers import PROVIDERS, iter_custom_instances, set_custom_providers
 from reports import ReportGenerator
 from storage import Repository
 
@@ -60,6 +60,14 @@ async def default_providers_payload() -> dict[str, dict[str, Any]]:
         available = provider.is_available()
         models = await provider.list_models() if available else []
         result[name] = {"available": available, "models": models}
+    for custom in iter_custom_instances():
+        available = custom.is_available()
+        models = await custom.list_models() if available else []
+        result[f"custom:{custom.provider_id}"] = {
+            "available": available,
+            "models": models,
+            "label": f"{custom.name} (кастомный)",
+        }
     return result
 
 
@@ -92,6 +100,7 @@ async def build_default_runtime() -> AppRuntime:
     observer_provider, observer_model = pick_observer_provider(providers)
     repository.bootstrap(default_profiles, observer_provider, observer_model)
     repository.normalize_incomplete_sessions()
+    set_custom_providers(repository.list_custom_provider_records())
 
     manager = ConnectionManager()
     engine = DebateEngine(broadcast=manager.broadcast, repository=repository)
