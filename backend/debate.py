@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import random
 from dataclasses import dataclass
 from typing import Awaitable, Callable
@@ -18,6 +19,8 @@ from knowledge.lightrag_adapter import (
 from meta_memory import format_insight_recall, select_relevant_session_insights, store_session_memories
 from storage import Repository, utc_now
 
+
+logger = logging.getLogger(__name__)
 
 BroadcastFn = Callable[[dict], Awaitable[None]]
 
@@ -1488,6 +1491,12 @@ class DebateEngine:
                 root_dir=PROFILE_GRAPH_ROOT,
             )
         except Exception:
+            logger.warning(
+                "Не удалось сохранить память персонажа %s (граф %s)",
+                participant.get("name"),
+                memory_graph_id,
+                exc_info=True,
+            )
             return
 
         if created_graph:

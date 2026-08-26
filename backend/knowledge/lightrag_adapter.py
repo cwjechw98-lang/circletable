@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import threading
@@ -10,8 +11,12 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import numpy as np
 from lightrag import LightRAG, QueryParam
 from lightrag.utils import EmbeddingFunc
+
+
+logger = logging.getLogger(__name__)
 
 
 _instances: dict[str, LightRAG] = {}
@@ -108,8 +113,11 @@ async def _embed_one(text: str) -> list[float]:
     raise RuntimeError("Ollama embeddings endpoint returned no embedding vector")
 
 
-async def _embedding_func(texts: list[str]) -> list[list[float]]:
-    return await asyncio.gather(*(_embed_one(text) for text in texts))
+async def _embedding_func(texts: list[str]) -> "np.ndarray":
+    # lightrag-hku ожидает numpy-массив (обращается к .size): возврат списка
+    # ломает пайплайн вставки на первом же чанке.
+    vectors = await asyncio.gather(*(_embed_one(text) for text in texts))
+    return np.array(vectors, dtype=float)
 
 
 async def _get_embedding_dim() -> int:
