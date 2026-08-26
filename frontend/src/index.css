@@ -3981,3 +3981,324 @@ body.is-resizing-chat * {
     grid-template-columns: 1fr;
   }
 }
+
+/* ===================== Лаборатория персонажей ===================== */
+
+.drawer-lab {
+  width: min(520px, 94vw);
+}
+
+.lab-content {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--pixel) * 3);
+}
+
+.lab-error {
+  color: var(--red);
+}
+
+.lab-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: calc(var(--pixel) * 2);
+}
+
+.lab-card {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--pixel) * 2);
+  width: 100%;
+  text-align: left;
+  padding: calc(var(--pixel) * 2);
+  background: var(--surface);
+  border: 2px solid var(--border);
+  box-shadow: var(--button-shadow-soft);
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text);
+}
+
+.lab-card:hover {
+  border-color: var(--gold);
+}
+
+.lab-card-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 2px solid var(--border);
+  flex-shrink: 0;
+}
+
+.lab-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lab-card-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lab-card-name {
+  font-family: var(--font-pixel);
+  font-size: calc(10px * var(--ui-font-scale));
+  color: var(--gold);
+}
+
+.lab-card-role,
+.lab-card-career {
+  font-family: var(--font-mono);
+  font-size: calc(12px * var(--ui-font-scale));
+  color: var(--muted);
+}
+
+.lab-card-career {
+  font-size: calc(11px * var(--ui-font-scale));
+}
+
+.lab-card-open {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.lab-card:hover .lab-card-open {
+  color: var(--gold);
+}
+
+.dossier-back {
+  align-self: flex-start;
+}
+
+.dossier-head {
+  display: flex;
+  gap: calc(var(--pixel) * 2);
+  align-items: center;
+}
+
+.dossier-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 68px;
+  height: 68px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 2px solid var(--border);
+  flex-shrink: 0;
+}
+
+.dossier-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dossier-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dossier-name {
+  font-family: var(--font-pixel);
+  font-size: calc(13px * var(--ui-font-scale));
+  color: var(--gold);
+  word-break: break-word;
+}
+
+.dossier-sub,
+.dossier-model {
+  font-family: var(--font-mono);
+  font-size: calc(12px * var(--ui-font-scale));
+  color: var(--muted);
+}
+
+.dossier-model {
+  color: var(--cyan);
+}
+
+.dossier-summary {
+  padding: calc(var(--pixel) * 2);
+  background: var(--panel-note-bg);
+  color: var(--panel-note-text);
+  border-left: 3px solid var(--gold-dim);
+  font-family: var(--font-mono);
+  font-size: calc(12px * var(--ui-font-scale));
+}
+
+.dossier-section-title {
+  margin-top: calc(var(--pixel) * 1);
+  font-family: var(--font-pixel);
+  font-size: calc(9px * var(--ui-font-scale));
+  color: var(--cyan);
+  letter-spacing: 1px;
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 6px;
+}
+
+.dossier-stats {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--pixel) * 1.5);
+}
+
+.dossier-stat.is-up .dossier-stat-total {
+  color: var(--green);
+}
+
+.dossier-stat.is-down .dossier-stat-total {
+  color: var(--red);
+}
+
+.dossier-stat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.dossier-stat-label {
+  font-family: var(--font-pixel);
+  font-size: calc(8px * var(--ui-font-scale));
+  color: var(--text);
+}
+
+.dossier-stat-total {
+  font-family: var(--font-mono);
+  font-size: calc(12px * var(--ui-font-scale));
+  color: var(--muted);
+}
+
+.dossier-stat-body {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--pixel) * 1.5);
+}
+
+.dossier-stat-body .stat-track {
+  flex: 1;
+}
+
+.dossier-stat-value {
+  font-family: var(--font-mono);
+  font-size: calc(13px * var(--ui-font-scale));
+  color: var(--text);
+  min-width: 26px;
+  text-align: right;
+}
+
+.stat-sparkline {
+  color: var(--cyan);
+  flex-shrink: 0;
+}
+
+.stat-spark-empty {
+  font-family: var(--font-mono);
+  font-size: calc(10px * var(--ui-font-scale));
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.dossier-career {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: calc(var(--pixel) * 1.5);
+}
+
+.dossier-career-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: calc(var(--pixel) * 1.5) 0;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: calc(9px * var(--ui-font-scale));
+  color: var(--muted);
+  text-align: center;
+}
+
+.dossier-career-cell span {
+  font-family: var(--font-pixel);
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--gold);
+}
+
+.dossier-empty {
+  font-family: var(--font-mono);
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--muted);
+}
+
+.dossier-achievements,
+.dossier-notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--pixel) * 1.5);
+}
+
+.dossier-achievements li {
+  display: flex;
+  gap: calc(var(--pixel) * 1.5);
+  align-items: baseline;
+  padding: calc(var(--pixel) * 1.5);
+  background: var(--surface);
+  border: 2px solid var(--border);
+}
+
+.dossier-achievement-round {
+  font-family: var(--font-pixel);
+  font-size: calc(7px * var(--ui-font-scale));
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.dossier-achievement-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: calc(12px * var(--ui-font-scale));
+  color: var(--text);
+}
+
+.dossier-achievement-body strong {
+  color: var(--gold);
+}
+
+.dossier-achievement-body em {
+  color: var(--muted);
+  font-style: normal;
+}
+
+.dossier-notes li {
+  padding: calc(var(--pixel) * 1.5);
+  background: var(--panel-note-bg);
+  color: var(--panel-note-text);
+  border-left: 3px solid var(--cyan);
+  font-family: var(--font-mono);
+  font-size: calc(11px * var(--ui-font-scale));
+}
+
+@media (max-width: 720px) {
+  .drawer-lab {
+    width: 96vw;
+  }
+
+  .dossier-career {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

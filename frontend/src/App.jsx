@@ -5,6 +5,7 @@ import ControlPanel from './components/ControlPanel.jsx'
 import RoundAnnounce from './components/RoundAnnounce.jsx'
 import RoomsDrawer from './components/RoomsDrawer.jsx'
 import InventoryDrawer from './components/InventoryDrawer.jsx'
+import LabDrawer from './components/LabDrawer.jsx'
 import TimedHintLayer from './components/TimedHintLayer.jsx'
 import TopicFocusOverlay from './components/TopicFocusOverlay.jsx'
 import useAppCommands from './hooks/useAppCommands.js'
@@ -118,6 +119,7 @@ export default function App() {
   const [refreshingProviders, setRefreshingProviders] = useState(false)
   const [roomsOpen, setRoomsOpen] = useState(false)
   const [inventoryOpen, setInventoryOpen] = useState(false)
+  const [labOpen, setLabOpen] = useState(false)
   const [theme, setTheme] = useState(readTheme)
   const [uiFontScale, setUiFontScale] = useState(readUiFontScale)
   const [fontPanelOpen, setFontPanelOpen] = useState(false)
@@ -416,6 +418,11 @@ export default function App() {
         onDeleteProfile={handleDeleteProfile}
       />
 
+      <LabDrawer
+        open={labOpen}
+        onClose={() => setLabOpen(false)}
+      />
+
       <header className="app-header">
         <div>
           <div className="header-title">⚔ Круглый стол ИИ ⚔</div>
@@ -504,6 +511,7 @@ export default function App() {
           onRequestFinal={handleRequestFinal}
           onOpenRooms={() => setRoomsOpen(true)}
           onOpenInventory={() => setInventoryOpen(true)}
+          onOpenLab={() => setLabOpen(true)}
           onRefreshProviders={() => {
             setRefreshingProviders(true)
             sendMsg({ type: 'get_providers' })

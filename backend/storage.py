@@ -37,6 +37,9 @@ def loads_json(value, fallback):
         return fallback
 
 
+STAT_KEYS = ("insight", "focus", "depth", "cooperation", "showmanship")
+
+
 class Repository:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -428,6 +431,179 @@ class Repository:
             "SELECT * FROM character_profiles WHERE is_saved = 1 ORDER BY updated_at DESC, name ASC"
         ).fetchall()
         return [self._profile_payload(row) for row in rows]
+
+    # --- Лаборатория персонажей (Фаза 1: досье) ---
+
+    def _lab_career_stats(self, profile_id: str) -> dict:
+        participant_rows = self.conn.execute(
+            "SELECT id FROM room_participants WHERE profile_id = ?",
+            (profile_id,),
+        ).fetchall()
+        participant_ids = [row["id"] for row in participant_rows]
+        career = {
+            "participantsCount": len(participant_ids),
+            "messagesCount": 0,
+            "sessionsCount": 0,
+            "roundsSpoken": 0,
+            "firstSeenAt": None,
+            "lastSeenAt": None,
+        }
+        if not participant_ids:
+            return career
+        placeholders = ",".join("?" for _ in participant_ids)
+        row = self.conn.execute(
+            f"""
+            SELECT COUNT(*) AS messages,
+                   COUNT(DISTINCT session_id) AS sessions,
+                   MIN(created_at) AS first_seen,
+                   MAX(created_at) AS last_seen
+            FROM messages
+            WHERE participant_id IN ({placeholders})
+            """,
+            participant_ids,
+        ).fetchone()
+        rounds_row = self.conn.execute(
+            f"""
+            SELECT COUNT(DISTINCT round_id)
+            FROM messages
+            WHERE participant_id IN ({placeholders}) AND round_id IS NOT NULL
+            """,
+            participant_ids,
+        ).fetchone()
+        career.update({
+            "messagesCount": int(row["messages"] or 0),
+            "sessionsCount": int(row["sessions"] or 0),
+            "roundsSpoken": int(rounds_row[0] or 0),
+            "firstSeenAt": row["first_seen"],
+            "lastSeenAt": row["last_seen"],
+        })
+        return career
+
+    def _lab_review_entries(self, profile_id: str) -> list[dict]:
+        entries: list[dict] = []
+        rows = self.conn.execute(
+            """
+            SELECT room_id, session_id, round_number, summary,
+                   achievements_json, stats_delta_json, comments_json, created_at
+            FROM observer_reviews
+            ORDER BY created_at ASC, round_number ASC
+            LIMIT 2000
+            """
+        ).fetchall()
+        for row in rows:
+            delta_map = loads_json(row["stats_delta_json"], {})
+            delta = delta_map.get(profile_id)
+            achievements = [
+                item
+                for item in loads_json(row["achievements_json"], [])
+                if isinstance(item, dict) and item.get("profileId") == profile_id
+            ]
+            note = loads_json(row["comments_json"], {}).get(profile_id, "")
+            if not delta and not achievements and not note:
+                continue
+            entries.append({
+                "roomId": row["room_id"],
+                "sessionId": row["session_id"],
+                "roundNumber": int(row["round_number"] or 0),
+                "createdAt": row["created_at"],
+                "roundSummary": row["summary"] or "",
+                "delta": {key: int((delta or {}).get(key, 0)) for key in STAT_KEYS},
+                "achievements": [
+                    {"title": item.get("title", "Заметный ход"), "reason": item.get("reason", "")}
+                    for item in achievements
+                ],
+                "note": note,
+            })
+        return entries
+
+    def list_lab_dossiers(self) -> list[dict]:
+        dossiers: list[dict] = []
+        for row in self.conn.execute(
+            "SELECT * FROM character_profiles WHERE is_saved = 1 ORDER BY updated_at DESC, name ASC"
+        ).fetchall():
+            profile = self._profile_payload(row)
+            career = self._lab_career_stats(profile["id"])
+            review_count = self.conn.execute(
+                """
+                SELECT COUNT(*) FROM observer_reviews
+                WHERE stats_delta_json LIKE ? OR achievements_json LIKE ?
+                """,
+                (f'%"{profile["id"]}"%', f'%"{profile["id"]}"%'),
+            ).fetchone()[0]
+            dossiers.append({
+                **profile,
+                "career": career,
+                "reviewMentions": int(review_count or 0),
+            })
+        return dossiers
+
+    def get_lab_dossier(self, profile_id: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM character_profiles WHERE id = ?",
+            (profile_id,),
+        ).fetchone()
+        if not row:
+            return None
+        profile = self._profile_payload(row)
+        entries = self._lab_review_entries(profile_id)
+
+        totals = {key: 0 for key in STAT_KEYS}
+        for entry in entries:
+            for key, value in entry["delta"].items():
+                totals[key] += value
+
+        start_values = {
+            key: int(profile["stats"].get(key, 50)) - totals[key]
+            for key in STAT_KEYS
+        }
+        cumulative = dict(start_values)
+        evolution: list[dict] = []
+        achievements_timeline: list[dict] = []
+        notes: list[dict] = []
+        for entry in entries:
+            for key in STAT_KEYS:
+                cumulative[key] += entry["delta"][key]
+            evolution.append({
+                "roundNumber": entry["roundNumber"],
+                "sessionId": entry["sessionId"],
+                "createdAt": entry["createdAt"],
+                "delta": entry["delta"],
+                "values": dict(cumulative),
+            })
+            for achievement in entry["achievements"]:
+                achievements_timeline.append({
+                    "roundNumber": entry["roundNumber"],
+                    "sessionId": entry["sessionId"],
+                    "createdAt": entry["createdAt"],
+                    "title": achievement["title"],
+                    "reason": achievement["reason"],
+                })
+            if entry["note"]:
+                notes.append({
+                    "roundNumber": entry["roundNumber"],
+                    "createdAt": entry["createdAt"],
+                    "text": entry["note"],
+                })
+
+        review_count = self.conn.execute(
+            """
+            SELECT COUNT(*) FROM observer_reviews
+            WHERE stats_delta_json LIKE ? OR achievements_json LIKE ?
+            """,
+            (f'%"{profile_id}"%', f'%"{profile_id}"%'),
+        ).fetchone()[0]
+
+        return {
+            **profile,
+            "career": self._lab_career_stats(profile_id),
+            "statsTotals": totals,
+            "startValues": start_values,
+            "evolution": evolution,
+            "achievements": achievements_timeline,
+            "notes": notes[-8:],
+            "reviewMentions": int(review_count or 0),
+        }
+
 
     def list_custom_specialties(self) -> list[dict]:
         rows = self.conn.execute(
